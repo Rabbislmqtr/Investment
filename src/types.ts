@@ -1,0 +1,61 @@
+export type ProfileRole = "member" | "admin" | "viewer";
+export type ContributionStatus = "pending" | "approved" | "rejected";
+
+export type Profile = {
+  id: string;
+  full_name: string;
+  email: string | null;
+  phone: string | null;
+  resident_country: string | null;
+  role: ProfileRole;
+};
+
+export type InvestmentProject = {
+  id: string;
+  name: string;
+  description: string | null;
+  target_amount_bdt: number;
+  currency_code: string;
+  is_active: boolean;
+};
+
+export type Contribution = {
+  id: string;
+  project_id: string;
+  member_id: string;
+  payment_date: string;
+  bdt_amount: number;
+  source_currency: string | null;
+  source_amount: number | null;
+  exchange_rate: number | null;
+  sent_from_country: string | null;
+  payment_method: string | null;
+  notes: string | null;
+  status: ContributionStatus;
+  reviewed_by: string | null;
+  reviewed_at: string | null;
+  rejection_reason: string | null;
+  created_at: string;
+  member?: Pick<Profile, "full_name" | "email"> | null;
+  profiles?: Pick<Profile, "full_name" | "email"> | null;
+  payment_receipts?: PaymentReceipt[];
+};
+
+export type PaymentReceipt = {
+  id: string;
+  contribution_id: string;
+  uploaded_by: string;
+  storage_bucket: string;
+  storage_path: string;
+  file_name: string;
+  file_type: string | null;
+  file_size: number | null;
+  created_at: string;
+};
+
+export type DashboardTotals = {
+  approved: number;
+  pending: number;
+  rejected: number;
+  totalCount: number;
+};
