@@ -11,6 +11,7 @@ import {
   LayoutDashboard,
   LogOut,
   ReceiptText,
+  Settings,
   ShieldCheck,
   Upload,
   UserRound,
@@ -26,6 +27,7 @@ import {
   getSignedReceiptUrl,
   reviewContribution,
   submitContribution,
+  updateProjectSettings,
   updateProfile,
 } from "./lib/investmentApi";
 import { formatBdt, formatDate, fileSizeLabel } from "./lib/format";
@@ -153,9 +155,10 @@ function InvestmentApp({ session }: { session: Session }) {
   return (
     <PageShell>
       <header className="app-header">
-        <div>
+        <div className="app-title">
           <p className="eyebrow">Private investment ledger</p>
           <h1>{project?.name ?? "Land & Home Investment"}</h1>
+          {project?.description && <p>{project.description}</p>}
         </div>
         <div className="header-actions">
           {isAdmin && (
@@ -198,8 +201,13 @@ function InvestmentApp({ session }: { session: Session }) {
         <StatusMessage title="Loading data" body="Reading member records and payment history." />
       ) : mode === "admin" && isAdmin ? (
         <AdminDashboard
+          project={project}
           contributions={contributions}
           reviewerId={session.user.id}
+          onProjectSaved={async () => {
+            setMessage("Project setup saved.");
+            await loadData("admin");
+          }}
           onReviewed={async (text) => {
             setMessage(text);
             await loadData("admin");
@@ -511,9 +519,11 @@ function PaymentForm({ userId, project, onSubmitted, onError }: {
   );
 }
 
-function AdminDashboard({ contributions, reviewerId, onReviewed, onError }: {
+function AdminDashboard({ project, contributions, reviewerId, onProjectSaved, onReviewed, onError }: {
+  project: InvestmentProject | null;
   contributions: Contribution[];
   reviewerId: string;
+  onProjectSaved: () => Promise<void>;
   onReviewed: (message: string) => Promise<void>;
   onError: (message: string) => void;
 }) {
@@ -537,6 +547,13 @@ function AdminDashboard({ contributions, reviewerId, onReviewed, onError }: {
 
   return (
     <div className="dashboard-grid">
+      {project && (
+        <ProjectSetupPanel
+          project={project}
+          onSaved={onProjectSaved}
+          onError={onError}
+        />
+      )}
       <section className="panel wide">
         <div className="panel-title">
           <ShieldCheck size={20} />
@@ -559,6 +576,74 @@ function AdminDashboard({ contributions, reviewerId, onReviewed, onError }: {
       </section>
       <ContributionTable title="All contribution records" contributions={contributions} admin />
     </div>
+  );
+}
+
+function ProjectSetupPanel({ project, onSaved, onError }: {
+  project: InvestmentProject;
+  onSaved: () => Promise<void>;
+  onError: (message: string) => void;
+}) {
+  const [name, setName] = useState(project.name);
+  const [description, setDescription] = useState(project.description ?? "");
+  const [targetAmount, setTargetAmount] = useState(String(Number(project.target_amount_bdt ?? 0)));
+  const [busy, setBusy] = useState(false);
+
+  useEffect(() => {
+    setName(project.name);
+    setDescription(project.description ?? "");
+    setTargetAmount(String(Number(project.target_amount_bdt ?? 0)));
+  }, [project]);
+
+  async function save(event: React.FormEvent<HTMLFormElement>) {
+    event.preventDefault();
+    setBusy(true);
+    try {
+      await updateProjectSettings({
+        id: project.id,
+        name: name.trim(),
+        description: description.trim() || null,
+        targetAmountBdt: Number(targetAmount),
+      });
+      await onSaved();
+    } catch (err) {
+      onError(getErrorMessage(err, "Could not save project setup."));
+    } finally {
+      setBusy(false);
+    }
+  }
+
+  return (
+    <form className="panel wide" onSubmit={(event) => void save(event)}>
+      <div className="panel-title">
+        <Settings size={20} />
+        <h2>Project setup</h2>
+      </div>
+      <div className="form-grid">
+        <label>
+          Project name
+          <input value={name} onChange={(event) => setName(event.target.value)} required />
+        </label>
+        <label>
+          Target amount in BDT
+          <input
+            type="number"
+            min="0"
+            step="1"
+            value={targetAmount}
+            onChange={(event) => setTargetAmount(event.target.value)}
+            required
+          />
+        </label>
+      </div>
+      <label>
+        Description
+        <textarea value={description} onChange={(event) => setDescription(event.target.value)} rows={3} />
+      </label>
+      <button className="secondary-button" type="submit" disabled={busy}>
+        {busy ? "Saving" : "Save setup"}
+      </button>
+    </form>
   );
 }
 
@@ -585,8 +670,8 @@ function ReviewItem({ contribution, onApprove, onReject }: {
     <article className="review-item">
       <div>
         <h3>{contribution.member?.full_name || contribution.member?.email || contribution.profiles?.full_name || contribution.profiles?.email || "Member"}</h3>
-        <p>{formatDate(contribution.payment_date)} · {formatBdt(Number(contribution.bdt_amount))}</p>
-        <p>{contribution.sent_from_country || "Country not set"} · {contribution.payment_method || "Method not set"}</p>
+        <p>{formatDate(contribution.payment_date)} / {formatBdt(Number(contribution.bdt_amount))}</p>
+          <p>{contribution.sent_from_country || "Country not set"} / {contribution.payment_method || "Method not set"}</p>
       </div>
       <div className="review-actions">
         <button className="secondary-button" type="button" onClick={() => void openReceipt()} disabled={!receipt || opening}>
@@ -628,12 +713,16 @@ function ContributionTable({ title, contributions, admin = false }: {
             <tbody>
               {contributions.map((contribution) => (
                 <tr key={contribution.id}>
-                  {admin && <td>{contribution.member?.full_name || contribution.member?.email || contribution.profiles?.full_name || contribution.profiles?.email || "Member"}</td>}
-                  <td>{formatDate(contribution.payment_date)}</td>
-                  <td>{formatBdt(Number(contribution.bdt_amount))}</td>
-                  <td>{contribution.source_currency ? `${contribution.source_currency} ${contribution.source_amount ?? ""}` : contribution.sent_from_country || "BDT"}</td>
-                  <td><StatusPill status={contribution.status} /></td>
-                  <td>{contribution.payment_receipts?.length ? contribution.payment_receipts[0].file_name : "None"}</td>
+                  {admin && (
+                    <td data-label="Member">
+                      {contribution.member?.full_name || contribution.member?.email || contribution.profiles?.full_name || contribution.profiles?.email || "Member"}
+                    </td>
+                  )}
+                  <td data-label="Date">{formatDate(contribution.payment_date)}</td>
+                  <td data-label="BDT">{formatBdt(Number(contribution.bdt_amount))}</td>
+                  <td data-label="Source">{contribution.source_currency ? `${contribution.source_currency} ${contribution.source_amount ?? ""}` : contribution.sent_from_country || "BDT"}</td>
+                  <td data-label="Status"><StatusPill status={contribution.status} /></td>
+                  <td data-label="Receipt">{contribution.payment_receipts?.length ? contribution.payment_receipts[0].file_name : "None"}</td>
                 </tr>
               ))}
             </tbody>

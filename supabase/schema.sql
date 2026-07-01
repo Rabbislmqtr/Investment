@@ -185,7 +185,7 @@ alter table public.exchange_rates enable row level security;
 alter table public.audit_logs enable row level security;
 
 grant usage on schema public to anon, authenticated;
-grant select on public.investment_projects to authenticated;
+grant select, update on public.investment_projects to authenticated;
 grant select, insert, update on public.profiles to authenticated;
 grant select, insert, update on public.group_members to authenticated;
 grant select, insert, update on public.contributions to authenticated;

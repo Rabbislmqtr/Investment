@@ -42,6 +42,26 @@ export async function getActiveProject(): Promise<InvestmentProject | null> {
   return data;
 }
 
+export async function updateProjectSettings(input: {
+  id: string;
+  name: string;
+  description: string | null;
+  targetAmountBdt: number;
+}) {
+  const { error } = await supabase
+    .from("investment_projects")
+    .update({
+      name: input.name,
+      description: input.description,
+      target_amount_bdt: input.targetAmountBdt,
+    })
+    .eq("id", input.id)
+    .select("id")
+    .single();
+
+  if (error) throw error;
+}
+
 export async function getMemberContributions(memberId: string): Promise<Contribution[]> {
   const { data, error } = await supabase
     .from("contributions")
