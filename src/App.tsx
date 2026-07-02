@@ -7,9 +7,12 @@ import {
   Banknote,
   CheckCircle2,
   Clock3,
+  Download,
   FileText,
+  Filter,
   LayoutDashboard,
   LogOut,
+  Menu,
   ReceiptText,
   Settings,
   ShieldCheck,
@@ -18,7 +21,7 @@ import {
   UserRound,
   XCircle,
 } from "lucide-react";
-import type { Contribution, InvestmentProject, MemberRecord, MembershipStatus, Profile, ProfileRole } from "./types";
+import type { Contribution, InvestmentProject, MemberPaymentStatus, MemberRecord, MembershipStatus, Profile, ProfileRole } from "./types";
 import {
   calculateTotals,
   getActiveProject,
@@ -26,6 +29,7 @@ import {
   getAdminMembers,
   getCurrentProfile,
   getMemberContributions,
+  getMemberPaymentStatus,
   getSignedReceiptUrl,
   reviewContribution,
   submitContribution,
@@ -37,6 +41,14 @@ import { formatBdt, formatDate, fileSizeLabel } from "./lib/format";
 import { hasSupabaseConfig, supabase } from "./lib/supabase";
 
 type ViewMode = "member" | "admin";
+type AdminSection = "overview" | "review" | "reports" | "members" | "project";
+type MemberSection = "overview" | "submit" | "status" | "history" | "profile";
+
+type MemberFilterOption = {
+  id: string;
+  name: string;
+  email: string | null;
+};
 
 const allowedReceiptTypes = ["application/pdf", "image/jpeg", "image/png", "image/jpg"];
 
@@ -113,7 +125,7 @@ function InvestmentApp({ session }: { session: Session }) {
 
   const isAdmin = profile?.role === "admin";
 
-  async function loadData(nextMode = mode) {
+  async function loadData(nextMode?: ViewMode) {
     setLoading(true);
     setError(null);
     try {
@@ -125,7 +137,10 @@ function InvestmentApp({ session }: { session: Session }) {
       setProfile(profileData);
       setProject(projectData);
 
-      const contributionData = nextMode === "admin" && profileData?.role === "admin"
+      const effectiveMode = profileData?.role === "admin" ? "admin" : nextMode ?? "member";
+      setMode(effectiveMode);
+
+      const contributionData = effectiveMode === "admin"
         ? await getAdminContributions()
         : await getMemberContributions(session.user.id);
 
@@ -139,25 +154,16 @@ function InvestmentApp({ session }: { session: Session }) {
 
   useEffect(() => {
     // eslint-disable-next-line react-hooks/set-state-in-effect
-    void loadData("member");
+    void loadData();
     // eslint-disable-next-line react-hooks/exhaustive-deps
   }, [session.user.id]);
-
-  async function switchMode(nextMode: ViewMode) {
-    setMode(nextMode);
-    await loadData(nextMode);
-  }
 
   async function signOut() {
     await supabase.auth.signOut();
   }
 
-  const totals = useMemo(() => calculateTotals(contributions), [contributions]);
-  const target = Number(project?.target_amount_bdt ?? 0);
-  const progress = target > 0 ? Math.min(100, (totals.approved / target) * 100) : 0;
-
   return (
-    <PageShell>
+    <PageShell adminShell={Boolean(profile)}>
       <header className="app-header">
         <div className="app-title">
           <p className="eyebrow">Private investment ledger</p>
@@ -165,16 +171,7 @@ function InvestmentApp({ session }: { session: Session }) {
           {project?.description && <p>{project.description}</p>}
         </div>
         <div className="header-actions">
-          {isAdmin && (
-            <div className="segmented-control" aria-label="Dashboard mode">
-              <button className={mode === "member" ? "active" : ""} onClick={() => void switchMode("member")}>
-                <UserRound size={16} /> Member
-              </button>
-              <button className={mode === "admin" ? "active" : ""} onClick={() => void switchMode("admin")}>
-                <ShieldCheck size={16} /> Admin
-              </button>
-            </div>
-          )}
+          {isAdmin && <span className="count-badge"><ShieldCheck size={14} /> Admin</span>}
           <button className="icon-button" type="button" onClick={() => void signOut()} title="Sign out" aria-label="Sign out">
             <LogOut size={18} />
           </button>
@@ -183,23 +180,6 @@ function InvestmentApp({ session }: { session: Session }) {
 
       {message && <InlineNotice tone="success" text={message} onClose={() => setMessage(null)} />}
       {error && <InlineNotice tone="error" text={error} onClose={() => setError(null)} />}
-
-      <section className="summary-grid">
-        <MetricCard icon={<Banknote />} label="Approved fund" value={formatBdt(totals.approved)} />
-        <MetricCard icon={<Clock3 />} label="Pending review" value={formatBdt(totals.pending)} />
-        <MetricCard icon={<ArrowDownUp />} label="Entries" value={String(totals.totalCount)} />
-        <MetricCard icon={<LayoutDashboard />} label="Target progress" value={target > 0 ? `${Math.round(progress)}%` : "No target"} />
-      </section>
-
-      {target > 0 && (
-        <div className="progress-wrap" aria-label="Investment target progress">
-          <div className="progress-labels">
-            <span>{formatBdt(totals.approved)}</span>
-            <span>{formatBdt(target)}</span>
-          </div>
-          <div className="progress-bar"><span style={{ width: `${progress}%` }} /></div>
-        </div>
-      )}
 
       {loading ? (
         <StatusMessage title="Loading data" body="Reading member records and payment history." />
@@ -316,17 +296,335 @@ function MemberDashboard(props: {
   onSubmitted: () => Promise<void>;
   onError: (message: string) => void;
 }) {
+  const [activeSection, setActiveSection] = useState<MemberSection>("overview");
+  const [sidebarOpen, setSidebarOpen] = useState(false);
+  const totals = useMemo(() => calculateTotals(props.contributions), [props.contributions]);
+  const pendingCount = props.contributions.filter((contribution) => contribution.status === "pending").length;
+  const approvedCount = props.contributions.filter((contribution) => contribution.status === "approved").length;
+  const navItems = memberNavItemsConfig(pendingCount, approvedCount);
+  const activeNavItem = navItems.find((item) => item.id === activeSection);
+
+  function selectSection(section: MemberSection) {
+    setActiveSection(section);
+    setSidebarOpen(false);
+  }
+
   return (
-    <div className="dashboard-grid">
-      <ProfilePanel userId={props.userId} profile={props.profile} onSaved={props.onSavedProfile} onError={props.onError} />
-      <PaymentForm
-        userId={props.userId}
-        project={props.project}
-        onSubmitted={props.onSubmitted}
-        onError={props.onError}
-      />
-      <ContributionTable title="My contribution history" contributions={props.contributions} />
+    <div className="admin-layout">
+      <button
+        className="admin-menu-button"
+        type="button"
+        onClick={() => setSidebarOpen(true)}
+        aria-label="Open member navigation"
+      >
+        <Menu size={20} />
+        <span>{activeNavItem?.label ?? "Menu"}</span>
+      </button>
+      {sidebarOpen && <button className="admin-sidebar-backdrop" type="button" aria-label="Close member navigation" onClick={() => setSidebarOpen(false)} />}
+      <aside className={sidebarOpen ? "admin-sidebar open" : "admin-sidebar"} aria-label="Member navigation">
+        <div className="admin-sidebar-head">
+          <span className="title-icon"><UserRound size={20} /></span>
+          <div>
+            <h2>Member</h2>
+            <p>Investment portal</p>
+          </div>
+        </div>
+        <nav className="admin-nav">
+          {navItems.map((item) => (
+            <button
+              key={item.id}
+              type="button"
+              className={activeSection === item.id ? "active" : ""}
+              onClick={() => selectSection(item.id)}
+            >
+              <span>{item.icon}</span>
+              <strong>{item.label}</strong>
+              <small>{item.detail}</small>
+            </button>
+          ))}
+        </nav>
+      </aside>
+
+      <main className="admin-content">
+        {activeSection === "overview" && (
+          <MemberOverview
+            project={props.project}
+            contributions={props.contributions}
+            totals={totals}
+            onNavigate={selectSection}
+          />
+        )}
+
+        {activeSection === "submit" && (
+          <PaymentForm
+            userId={props.userId}
+            project={props.project}
+            onSubmitted={props.onSubmitted}
+            onError={props.onError}
+          />
+        )}
+
+        {activeSection === "status" && (
+          <MemberPaymentStatusPanel project={props.project} onError={props.onError} />
+        )}
+
+        {activeSection === "history" && (
+          <ContributionTable title="My contribution history" contributions={props.contributions} />
+        )}
+
+        {activeSection === "profile" && (
+          <ProfilePanel userId={props.userId} profile={props.profile} onSaved={props.onSavedProfile} onError={props.onError} />
+        )}
+      </main>
     </div>
+  );
+}
+
+function memberNavItemsConfig(pendingCount: number, approvedCount: number): Array<{ id: MemberSection; label: string; icon: React.ReactNode; detail: string }> {
+  return [
+    { id: "overview", label: "Overview", icon: <LayoutDashboard size={17} />, detail: "My fund" },
+    { id: "submit", label: "Submit", icon: <Upload size={17} />, detail: "Payment proof" },
+    { id: "status", label: "Payment status", icon: <Users size={17} />, detail: "Paid list" },
+    { id: "history", label: "History", icon: <ReceiptText size={17} />, detail: `${approvedCount} approved` },
+    { id: "profile", label: "Profile", icon: <UserRound size={17} />, detail: `${pendingCount} pending` },
+  ];
+}
+
+function MemberOverview({ project, contributions, totals, onNavigate }: {
+  project: InvestmentProject | null;
+  contributions: Contribution[];
+  totals: ReturnType<typeof calculateTotals>;
+  onNavigate: (section: MemberSection) => void;
+}) {
+  const target = Number(project?.target_amount_bdt ?? 0);
+  const progress = target > 0 ? Math.min(100, (totals.approved / target) * 100) : 0;
+  const recent = contributions.slice(0, 5);
+
+  return (
+    <div className="admin-page-stack">
+      <section className="panel">
+        <div className="panel-title split-title">
+          <div>
+            <span className="title-icon"><LayoutDashboard size={20} /></span>
+            <h2>Member overview</h2>
+          </div>
+          <span className="count-badge">{project?.name ?? "No active project"}</span>
+        </div>
+        <div className="admin-metric-grid">
+          <MetricCard icon={<Banknote />} label="My approved fund" value={formatBdt(totals.approved)} />
+          <MetricCard icon={<Clock3 />} label="Waiting review" value={formatBdt(totals.pending)} />
+          <MetricCard icon={<ArrowDownUp />} label="My entries" value={String(totals.totalCount)} />
+          <MetricCard icon={<LayoutDashboard />} label="Target progress" value={target > 0 ? `${Math.round(progress)}%` : "No target"} />
+        </div>
+        {target > 0 && (
+          <div className="progress-wrap compact-progress" aria-label="Investment target progress">
+            <div className="progress-labels">
+              <span>{formatBdt(totals.approved)}</span>
+              <span>{formatBdt(target)}</span>
+            </div>
+            <div className="progress-bar"><span style={{ width: `${progress}%` }} /></div>
+          </div>
+        )}
+      </section>
+
+      <div className="overview-grid">
+        <section className="panel">
+          <div className="panel-title split-title">
+            <div>
+              <span className="title-icon"><Upload size={20} /></span>
+              <h2>Submit contribution</h2>
+            </div>
+            <button className="secondary-button" type="button" onClick={() => onNavigate("submit")}>Open form</button>
+          </div>
+          <div className="insight-list">
+            <InsightRow label="Pending review" value={formatBdt(totals.pending)} />
+            <InsightRow label="Rejected records" value={String(totals.rejected)} />
+            <InsightRow label="Total records" value={String(totals.totalCount)} />
+          </div>
+        </section>
+
+        <section className="panel">
+          <div className="panel-title split-title">
+            <div>
+              <span className="title-icon"><Users size={20} /></span>
+              <h2>Member payments</h2>
+            </div>
+            <button className="secondary-button" type="button" onClick={() => onNavigate("status")}>View status</button>
+          </div>
+          <div className="insight-list">
+            <InsightRow label="Approved amount" value={formatBdt(totals.approved)} />
+            <InsightRow label="Approved entries" value={String(contributions.filter((contribution) => contribution.status === "approved").length)} />
+            <InsightRow label="Shared view" value="Paid / not paid" />
+          </div>
+        </section>
+      </div>
+
+      <section className="panel">
+        <div className="panel-title split-title">
+          <div>
+            <span className="title-icon"><ReceiptText size={20} /></span>
+            <h2>Recent contribution history</h2>
+          </div>
+          <button className="secondary-button" type="button" onClick={() => onNavigate("history")}>Open history</button>
+        </div>
+        {recent.length === 0 ? (
+          <EmptyState text="No contribution records yet." />
+        ) : (
+          <div className="table-wrap">
+            <table>
+              <thead>
+                <tr>
+                  <th>Date</th>
+                  <th>BDT</th>
+                  <th>Source</th>
+                  <th>Status</th>
+                </tr>
+              </thead>
+              <tbody>
+                {recent.map((contribution) => (
+                  <tr key={contribution.id}>
+                    <td data-label="Date">{formatDate(contribution.payment_date)}</td>
+                    <td data-label="BDT">{formatBdt(Number(contribution.bdt_amount))}</td>
+                    <td data-label="Source">{contribution.source_currency ? `${contribution.source_currency} ${contribution.source_amount ?? ""}` : contribution.sent_from_country || "BDT"}</td>
+                    <td data-label="Status"><StatusPill status={contribution.status} /></td>
+                  </tr>
+                ))}
+              </tbody>
+            </table>
+          </div>
+        )}
+      </section>
+    </div>
+  );
+}
+
+function currentMonthKey() {
+  return new Date().toISOString().slice(0, 7);
+}
+
+function MemberPaymentStatusPanel({ project, onError }: {
+  project: InvestmentProject | null;
+  onError: (message: string) => void;
+}) {
+  const [month, setMonth] = useState(currentMonthKey());
+  const [rows, setRows] = useState<MemberPaymentStatus[]>([]);
+  const [loading, setLoading] = useState(false);
+  const projectId = project?.id;
+
+  useEffect(() => {
+    if (!projectId) return;
+    const activeProjectId = projectId;
+    let cancelled = false;
+
+    async function loadStatus() {
+      setLoading(true);
+      try {
+        const statusRows = await getMemberPaymentStatus(activeProjectId, month);
+        if (!cancelled) setRows(statusRows);
+      } catch (err) {
+        if (!cancelled) onError(getErrorMessage(err, "Could not load member payment status."));
+      } finally {
+        if (!cancelled) setLoading(false);
+      }
+    }
+
+    void loadStatus();
+    return () => {
+      cancelled = true;
+    };
+  }, [month, onError, projectId]);
+
+  const paidCount = rows.filter((row) => row.paid).length;
+  const unpaidCount = rows.length - paidCount;
+  const approvedTotal = rows.reduce((sum, row) => sum + row.approvedTotalBdt, 0);
+
+  async function openStatusReceipt(row: MemberPaymentStatus) {
+    if (!row.receiptStoragePath) {
+      onError("No receipt is attached to this approved payment.");
+      return;
+    }
+
+    try {
+      const url = await getSignedReceiptUrl(row.receiptStoragePath);
+      window.open(url, "_blank", "noopener,noreferrer");
+    } catch (err) {
+      onError(getErrorMessage(err, "Could not open receipt."));
+    }
+  }
+
+  return (
+    <section className="panel">
+      <div className="panel-title split-title">
+        <div>
+          <span className="title-icon"><Users size={20} /></span>
+          <h2>Member payment status</h2>
+        </div>
+        <span className="count-badge">{monthLabel(month)}</span>
+      </div>
+      <p className="helper-text">This list shows project members with approved payments in the selected month. Members without an approved payment are marked as not paid.</p>
+      <div className="filter-grid">
+        <label>
+          Month
+          <input type="month" value={month} onChange={(event) => setMonth(event.target.value)} />
+        </label>
+      </div>
+      <div className="admin-metric-grid">
+        <MetricCard icon={<CheckCircle2 />} label="Paid members" value={loading ? "Loading" : String(paidCount)} />
+        <MetricCard icon={<Clock3 />} label="Not paid" value={loading ? "Loading" : String(unpaidCount)} />
+        <MetricCard icon={<Banknote />} label="Approved BDT" value={formatBdt(approvedTotal)} />
+        <MetricCard icon={<Users />} label="Members shown" value={loading ? "Loading" : String(rows.length)} />
+      </div>
+
+      {loading ? (
+        <StatusMessage title="Loading payment status" body="Checking approved contributions for the selected month." />
+      ) : rows.length === 0 ? (
+        <EmptyState text="No active members found for this project." />
+      ) : (
+        <div className="table-wrap">
+          <table>
+            <thead>
+              <tr>
+                <th>Member</th>
+                <th>Status</th>
+                <th>BDT</th>
+                <th>Payments</th>
+                <th>Last paid</th>
+                <th>Method</th>
+                <th>Receipt</th>
+              </tr>
+            </thead>
+            <tbody>
+              {rows.map((row) => (
+                <tr key={row.memberId}>
+                  <td data-label="Member">
+                    <strong>{row.memberName}</strong>
+                  </td>
+                  <td data-label="Status">
+                    <span className={`status-pill ${row.paid ? "approved" : "pending"}`}>
+                      {row.paid ? <CheckCircle2 size={14} /> : <Clock3 size={14} />}
+                      {row.paid ? "Paid" : "Not paid"}
+                    </span>
+                  </td>
+                  <td data-label="BDT">{formatBdt(row.approvedTotalBdt)}</td>
+                  <td data-label="Payments">{row.paymentCount}</td>
+                  <td data-label="Last paid">{row.lastPaymentDate ? formatDate(row.lastPaymentDate) : "None"}</td>
+                  <td data-label="Method">{row.lastPaymentMethod ?? "Not set"}</td>
+                  <td data-label="Receipt">
+                    {row.receiptStoragePath ? (
+                      <button className="receipt-link" type="button" onClick={() => void openStatusReceipt(row)}>
+                        {row.receiptFileName ?? "Open receipt"}
+                      </button>
+                    ) : (
+                      "None"
+                    )}
+                  </td>
+                </tr>
+              ))}
+            </tbody>
+          </table>
+        </div>
+      )}
+    </section>
   );
 }
 
@@ -534,7 +832,30 @@ function AdminDashboard({ project, contributions, reviewerId, currentUserId, onP
   onReviewed: (message: string) => Promise<void>;
   onError: (message: string) => void;
 }) {
+  const [activeSection, setActiveSection] = useState<AdminSection>("overview");
+  const [sidebarOpen, setSidebarOpen] = useState(false);
+  const [members, setMembers] = useState<MemberRecord[]>([]);
+  const [loadingMembers, setLoadingMembers] = useState(false);
   const pending = contributions.filter((item) => item.status === "pending");
+
+  async function loadMembers() {
+    if (!project) return;
+    setLoadingMembers(true);
+    try {
+      setMembers(await getAdminMembers(project.id));
+    } catch (err) {
+      onError(getErrorMessage(err, "Could not load members."));
+    } finally {
+      setLoadingMembers(false);
+    }
+  }
+
+  useEffect(() => {
+    if (!project) return;
+    // eslint-disable-next-line react-hooks/set-state-in-effect
+    void loadMembers();
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [project?.id]);
 
   async function handleReview(contribution: Contribution, status: "approved" | "rejected") {
     const reason = status === "rejected" ? window.prompt("Reason for rejection?") ?? "Rejected by admin" : undefined;
@@ -552,73 +873,505 @@ function AdminDashboard({ project, contributions, reviewerId, currentUserId, onP
     }
   }
 
+  async function openContributionReceipt(contribution: Contribution) {
+    const receipt = contribution.payment_receipts?.[0];
+    if (!receipt) {
+      onError("No receipt file is attached to this contribution.");
+      return;
+    }
+
+    try {
+      const url = await getSignedReceiptUrl(receipt.storage_path);
+      window.open(url, "_blank", "noopener,noreferrer");
+    } catch (err) {
+      onError(getErrorMessage(err, "Could not open receipt."));
+    }
+  }
+
+  function selectSection(section: AdminSection) {
+    setActiveSection(section);
+    setSidebarOpen(false);
+  }
+
+  const activeNavItem = navItemsConfig(pending.length, members.length).find((item) => item.id === activeSection);
+  const navItems = navItemsConfig(pending.length, members.length);
+
   return (
-    <div className="dashboard-grid">
-      {project && (
-        <ProjectSetupPanel
-          project={project}
-          onSaved={onProjectSaved}
-          onError={onError}
-        />
-      )}
-      {project && (
-        <MemberManagementPanel
-          projectId={project.id}
-          currentUserId={currentUserId}
-          onError={onError}
-        />
-      )}
-      <section className="panel wide">
-        <div className="panel-title">
-          <ShieldCheck size={20} />
-          <h2>Pending review</h2>
-        </div>
-        {pending.length === 0 ? (
-          <EmptyState text="No pending payments need review." />
-        ) : (
-          <div className="review-list">
-            {pending.map((contribution) => (
-              <ReviewItem
-                key={contribution.id}
-                contribution={contribution}
-                onApprove={() => void handleReview(contribution, "approved")}
-                onReject={() => void handleReview(contribution, "rejected")}
-              />
-            ))}
+    <div className="admin-layout">
+      <button
+        className="admin-menu-button"
+        type="button"
+        onClick={() => setSidebarOpen(true)}
+        aria-label="Open admin navigation"
+      >
+        <Menu size={20} />
+        <span>{activeNavItem?.label ?? "Menu"}</span>
+      </button>
+      {sidebarOpen && <button className="admin-sidebar-backdrop" type="button" aria-label="Close admin navigation" onClick={() => setSidebarOpen(false)} />}
+      <aside className={sidebarOpen ? "admin-sidebar open" : "admin-sidebar"} aria-label="Admin navigation">
+        <div className="admin-sidebar-head">
+          <span className="title-icon"><ShieldCheck size={20} /></span>
+          <div>
+            <h2>Admin</h2>
+            <p>Operations dashboard</p>
           </div>
+        </div>
+        <nav className="admin-nav">
+          {navItems.map((item) => (
+            <button
+              key={item.id}
+              type="button"
+              className={activeSection === item.id ? "active" : ""}
+              onClick={() => selectSection(item.id)}
+            >
+              <span>{item.icon}</span>
+              <strong>{item.label}</strong>
+              <small>{item.detail}</small>
+            </button>
+          ))}
+        </nav>
+      </aside>
+
+      <main className="admin-content">
+        {activeSection === "overview" && (
+          <AdminOverview
+            project={project}
+            contributions={contributions}
+            members={members}
+            loadingMembers={loadingMembers}
+            onNavigate={selectSection}
+            onOpenReceipt={openContributionReceipt}
+          />
         )}
-      </section>
-      <ContributionTable title="All contribution records" contributions={contributions} admin />
+
+        {activeSection === "review" && (
+          <PendingReviewPanel
+            pending={pending}
+            onReview={handleReview}
+          />
+        )}
+
+        {activeSection === "reports" && <AdminReportPanel contributions={contributions} onOpenReceipt={openContributionReceipt} />}
+
+        {activeSection === "members" && project && (
+          <MemberManagementPanel
+            projectId={project.id}
+            currentUserId={currentUserId}
+            members={members}
+            loading={loadingMembers}
+            onReload={loadMembers}
+            onError={onError}
+          />
+        )}
+
+        {activeSection === "project" && project && (
+          <ProjectSetupPanel
+            project={project}
+            onSaved={onProjectSaved}
+            onError={onError}
+          />
+        )}
+      </main>
     </div>
   );
 }
 
-function MemberManagementPanel({ projectId, currentUserId, onError }: {
-  projectId: string;
-  currentUserId: string;
-  onError: (message: string) => void;
-}) {
-  const [members, setMembers] = useState<MemberRecord[]>([]);
-  const [search, setSearch] = useState("");
-  const [loading, setLoading] = useState(true);
-  const [message, setMessage] = useState<string | null>(null);
+function navItemsConfig(pendingCount: number, memberCount: number): Array<{ id: AdminSection; label: string; icon: React.ReactNode; detail: string }> {
+  return [
+    { id: "overview", label: "Overview", icon: <LayoutDashboard size={17} />, detail: "Fund health" },
+    { id: "review", label: "Review", icon: <ShieldCheck size={17} />, detail: `${pendingCount} pending` },
+    { id: "reports", label: "Reports", icon: <Filter size={17} />, detail: "Approved ledger" },
+    { id: "members", label: "Members", icon: <Users size={17} />, detail: `${memberCount} users` },
+    { id: "project", label: "Project", icon: <Settings size={17} />, detail: "Setup" },
+  ];
+}
 
-  async function loadMembers() {
-    setLoading(true);
-    try {
-      setMembers(await getAdminMembers(projectId));
-    } catch (err) {
-      onError(getErrorMessage(err, "Could not load members."));
-    } finally {
-      setLoading(false);
-    }
+function AdminOverview({ project, contributions, members, loadingMembers, onNavigate, onOpenReceipt }: {
+  project: InvestmentProject | null;
+  contributions: Contribution[];
+  members: MemberRecord[];
+  loadingMembers: boolean;
+  onNavigate: (section: AdminSection) => void;
+  onOpenReceipt: (contribution: Contribution) => Promise<void>;
+}) {
+  const memberContributions = contributions.filter((contribution) => !isContributionFromAdmin(contribution));
+  const approved = memberContributions.filter((contribution) => contribution.status === "approved");
+  const pending = memberContributions.filter((contribution) => contribution.status === "pending");
+  const rejected = memberContributions.filter((contribution) => contribution.status === "rejected");
+  const approvedTotal = approved.reduce((sum, contribution) => sum + Number(contribution.bdt_amount), 0);
+  const pendingTotal = pending.reduce((sum, contribution) => sum + Number(contribution.bdt_amount), 0);
+  const receiptBackedApproved = approved.filter((contribution) => (contribution.payment_receipts?.length ?? 0) > 0).length;
+  const memberAccounts = members.filter(isMemberAccount);
+  const activeMembers = memberAccounts.filter((member) => getEffectiveMembershipStatus(member) === "active").length;
+  const pausedMembers = memberAccounts.filter((member) => getEffectiveMembershipStatus(member) === "paused").length;
+  const needsSetupMembers = memberAccounts.filter((member) => !member.membership).length;
+  const adminUsers = members.filter((member) => member.role === "admin").length;
+  const target = Number(project?.target_amount_bdt ?? 0);
+  const progress = target > 0 ? Math.min(100, (approvedTotal / target) * 100) : 0;
+  const recentApproved = approved
+    .slice()
+    .sort((a, b) => b.payment_date.localeCompare(a.payment_date))
+    .slice(0, 5);
+
+  return (
+    <div className="admin-page-stack">
+      <section className="panel">
+        <div className="panel-title split-title">
+          <div>
+            <span className="title-icon"><LayoutDashboard size={20} /></span>
+            <h2>Dashboard overview</h2>
+          </div>
+          <span className="count-badge">{project?.name ?? "No active project"}</span>
+        </div>
+        <div className="admin-metric-grid">
+          <MetricCard icon={<Banknote />} label="Approved member fund" value={formatBdt(approvedTotal)} />
+          <MetricCard icon={<Clock3 />} label="Pending review" value={`${pending.length} / ${formatBdt(pendingTotal)}`} />
+          <MetricCard icon={<Users />} label="Active members" value={loadingMembers ? "Loading" : String(activeMembers)} />
+          <MetricCard icon={<ReceiptText />} label="Receipt-backed approved" value={`${receiptBackedApproved}/${approved.length}`} />
+        </div>
+        {target > 0 && (
+          <div className="progress-wrap compact-progress" aria-label="Investment target progress">
+            <div className="progress-labels">
+              <span>{Math.round(progress)}% funded</span>
+              <span>{formatBdt(target)}</span>
+            </div>
+            <div className="progress-bar"><span style={{ width: `${progress}%` }} /></div>
+          </div>
+        )}
+      </section>
+
+      <div className="overview-grid">
+        <section className="panel">
+          <div className="panel-title split-title">
+            <div>
+              <span className="title-icon"><ShieldCheck size={20} /></span>
+              <h2>Action queue</h2>
+            </div>
+            <button className="secondary-button" type="button" onClick={() => onNavigate("review")}>Open review</button>
+          </div>
+          <div className="insight-list">
+            <InsightRow label="Payments waiting approval" value={String(pending.length)} />
+            <InsightRow label="Rejected records" value={String(rejected.length)} />
+            <InsightRow label="Receipt coverage" value={approved.length ? `${Math.round((receiptBackedApproved / approved.length) * 100)}%` : "No approved records"} />
+          </div>
+        </section>
+
+        <section className="panel">
+          <div className="panel-title split-title">
+            <div>
+              <span className="title-icon"><Users size={20} /></span>
+              <h2>Membership</h2>
+            </div>
+            <button className="secondary-button" type="button" onClick={() => onNavigate("members")}>Manage members</button>
+          </div>
+          <div className="insight-list">
+            <InsightRow label="Active members" value={loadingMembers ? "Loading" : String(activeMembers)} />
+            <InsightRow label="Paused members" value={loadingMembers ? "Loading" : String(pausedMembers)} />
+            <InsightRow label="Needs setup" value={loadingMembers ? "Loading" : String(needsSetupMembers)} />
+            <InsightRow label="Admin users" value={loadingMembers ? "Loading" : String(adminUsers)} />
+          </div>
+        </section>
+      </div>
+
+      <section className="panel">
+        <div className="panel-title split-title">
+          <div>
+            <span className="title-icon"><ReceiptText size={20} /></span>
+            <h2>Recent approved contributions</h2>
+          </div>
+          <button className="secondary-button" type="button" onClick={() => onNavigate("reports")}>Open reports</button>
+        </div>
+        {recentApproved.length === 0 ? (
+          <EmptyState text="No approved member contributions yet." />
+        ) : (
+          <div className="table-wrap">
+            <table>
+              <thead>
+                <tr>
+                  <th>Date</th>
+                  <th>Member</th>
+                  <th>BDT</th>
+                  <th>Receipt</th>
+                </tr>
+              </thead>
+              <tbody>
+                {recentApproved.map((contribution) => (
+                  <tr key={contribution.id}>
+                    <td data-label="Date">{formatDate(contribution.payment_date)}</td>
+                    <td data-label="Member">{getContributionMemberName(contribution)}</td>
+                    <td data-label="BDT">{formatBdt(Number(contribution.bdt_amount))}</td>
+                    <td data-label="Receipt"><ReceiptLink contribution={contribution} onOpenReceipt={onOpenReceipt} /></td>
+                  </tr>
+                ))}
+              </tbody>
+            </table>
+          </div>
+        )}
+      </section>
+    </div>
+  );
+}
+
+function PendingReviewPanel({ pending, onReview }: {
+  pending: Contribution[];
+  onReview: (contribution: Contribution, status: "approved" | "rejected") => Promise<void>;
+}) {
+  return (
+    <section className="panel">
+      <div className="panel-title split-title">
+        <div>
+          <span className="title-icon"><ShieldCheck size={20} /></span>
+          <h2>Pending review</h2>
+        </div>
+        <span className="count-badge">{pending.length} payments</span>
+      </div>
+      {pending.length === 0 ? (
+        <EmptyState text="No pending payments need review." />
+      ) : (
+        <div className="review-list">
+          {pending.map((contribution) => (
+            <ReviewItem
+              key={contribution.id}
+              contribution={contribution}
+              onApprove={() => void onReview(contribution, "approved")}
+              onReject={() => void onReview(contribution, "rejected")}
+            />
+          ))}
+        </div>
+      )}
+    </section>
+  );
+}
+
+function InsightRow({ label, value }: { label: string; value: string }) {
+  return (
+    <div className="insight-row">
+      <span>{label}</span>
+      <strong>{value}</strong>
+    </div>
+  );
+}
+
+function monthKey(value: string) {
+  return value.slice(0, 7);
+}
+
+function monthLabel(value: string) {
+  const [year, month] = value.split("-").map(Number);
+  if (!year || !month) return value;
+  return new Intl.DateTimeFormat("en", { month: "long", year: "numeric" }).format(new Date(year, month - 1, 1));
+}
+
+function getContributionMemberName(contribution: Contribution) {
+  return contribution.member?.full_name || contribution.member?.email || contribution.profiles?.full_name || contribution.profiles?.email || "Member";
+}
+
+function isContributionFromAdmin(contribution: Contribution) {
+  return contribution.member?.role === "admin" || contribution.profiles?.role === "admin";
+}
+
+function isMemberAccount(member: MemberRecord) {
+  return member.role !== "admin";
+}
+
+function getEffectiveMembershipStatus(member: MemberRecord): MembershipStatus {
+  if (member.role === "admin") return "left";
+  return member.membership?.status ?? "active";
+}
+
+function escapeCsvCell(value: string | number | null | undefined) {
+  const text = value === null || value === undefined ? "" : String(value);
+  return `"${text.replace(/"/g, '""')}"`;
+}
+
+function downloadCsv(filename: string, rows: Array<Array<string | number | null | undefined>>) {
+  const csv = rows.map((row) => row.map(escapeCsvCell).join(",")).join("\r\n");
+  const blob = new Blob([csv], { type: "text/csv;charset=utf-8" });
+  const url = URL.createObjectURL(blob);
+  const link = document.createElement("a");
+  link.href = url;
+  link.download = filename;
+  document.body.appendChild(link);
+  link.click();
+  link.remove();
+  URL.revokeObjectURL(url);
+}
+
+function AdminReportPanel({ contributions, onOpenReceipt }: {
+  contributions: Contribution[];
+  onOpenReceipt: (contribution: Contribution) => Promise<void>;
+}) {
+  const [selectedMonth, setSelectedMonth] = useState("all");
+  const [selectedMember, setSelectedMember] = useState("all");
+
+  const approvedContributions = useMemo(
+    () => contributions.filter((contribution) => contribution.status === "approved" && !isContributionFromAdmin(contribution)),
+    [contributions],
+  );
+
+  const monthOptions = useMemo(() => {
+    return Array.from(new Set(approvedContributions.map((contribution) => monthKey(contribution.payment_date))))
+      .sort((a, b) => b.localeCompare(a));
+  }, [approvedContributions]);
+
+  const memberOptions = useMemo<MemberFilterOption[]>(() => {
+    const members = new Map<string, MemberFilterOption>();
+    approvedContributions.forEach((contribution) => {
+      if (!members.has(contribution.member_id)) {
+        members.set(contribution.member_id, {
+          id: contribution.member_id,
+          name: getContributionMemberName(contribution),
+          email: contribution.member?.email ?? contribution.profiles?.email ?? null,
+        });
+      }
+    });
+    return Array.from(members.values()).sort((a, b) => a.name.localeCompare(b.name));
+  }, [approvedContributions]);
+
+  const filteredContributions = useMemo(() => {
+    return approvedContributions.filter((contribution) => {
+      const matchesMonth = selectedMonth === "all" || monthKey(contribution.payment_date) === selectedMonth;
+      const matchesMember = selectedMember === "all" || contribution.member_id === selectedMember;
+      return matchesMonth && matchesMember;
+    });
+  }, [approvedContributions, selectedMember, selectedMonth]);
+
+  const reportTotal = filteredContributions.reduce((sum, contribution) => sum + Number(contribution.bdt_amount), 0);
+  const receiptBackedCount = filteredContributions.filter((contribution) => (contribution.payment_receipts?.length ?? 0) > 0).length;
+  const selectedMemberName = selectedMember === "all"
+    ? "All members"
+    : memberOptions.find((member) => member.id === selectedMember)?.name ?? "Selected member";
+
+  function exportReport() {
+    const rows: Array<Array<string | number | null | undefined>> = [
+      ["Home Investment approved contribution ledger"],
+      ["Month", selectedMonth === "all" ? "All months" : monthLabel(selectedMonth)],
+      ["Member", selectedMemberName],
+      ["Approved BDT total", reportTotal.toFixed(2)],
+      ["Receipt-backed entries", `${receiptBackedCount} of ${filteredContributions.length}`],
+      [],
+      [
+        "Payment date",
+        "Member",
+        "Email",
+        "BDT amount",
+        "Source currency",
+        "Source amount",
+        "Exchange rate",
+        "Sent from",
+        "Payment method",
+        "Receipt file",
+        "Receipt storage path",
+        "Reviewed at",
+        "Notes",
+      ],
+      ...filteredContributions.map((contribution) => {
+        const receipt = contribution.payment_receipts?.[0];
+        return [
+          contribution.payment_date,
+          getContributionMemberName(contribution),
+          contribution.member?.email ?? contribution.profiles?.email ?? "",
+          Number(contribution.bdt_amount).toFixed(2),
+          contribution.source_currency,
+          contribution.source_amount ?? "",
+          contribution.exchange_rate ?? "",
+          contribution.sent_from_country,
+          contribution.payment_method,
+          receipt?.file_name ?? "",
+          receipt?.storage_path ?? "",
+          contribution.reviewed_at ? new Date(contribution.reviewed_at).toISOString() : "",
+          contribution.notes,
+        ];
+      }),
+    ];
+
+    const filenameMonth = selectedMonth === "all" ? "all-months" : selectedMonth;
+    const filenameMember = selectedMember === "all" ? "all-members" : selectedMemberName.toLowerCase().replace(/[^a-z0-9]+/g, "-");
+    downloadCsv(`approved-contributions-${filenameMonth}-${filenameMember}.csv`, rows);
   }
 
-  useEffect(() => {
-    // eslint-disable-next-line react-hooks/set-state-in-effect
-    void loadMembers();
-    // eslint-disable-next-line react-hooks/exhaustive-deps
-  }, [projectId]);
+  return (
+    <section className="panel wide">
+      <div className="panel-title split-title">
+        <div>
+          <span className="title-icon"><Filter size={20} /></span>
+          <h2>Approved ledger report</h2>
+        </div>
+        <button className="secondary-button" type="button" onClick={exportReport} disabled={filteredContributions.length === 0}>
+          <Download size={16} /> Export CSV
+        </button>
+      </div>
+      <div className="report-toolbar">
+        <label>
+          Month
+          <select value={selectedMonth} onChange={(event) => setSelectedMonth(event.target.value)}>
+            <option value="all">All months</option>
+            {monthOptions.map((month) => (
+              <option key={month} value={month}>{monthLabel(month)}</option>
+            ))}
+          </select>
+        </label>
+        <label>
+          Member
+          <select value={selectedMember} onChange={(event) => setSelectedMember(event.target.value)}>
+            <option value="all">All members</option>
+            {memberOptions.map((member) => (
+              <option key={member.id} value={member.id}>
+                {member.name}{member.email ? ` (${member.email})` : ""}
+              </option>
+            ))}
+          </select>
+        </label>
+      </div>
+      <div className="report-summary">
+        <MetricCard icon={<Banknote />} label="Approved BDT in report" value={formatBdt(reportTotal)} />
+        <MetricCard icon={<ReceiptText />} label="Receipt-backed entries" value={`${receiptBackedCount}/${filteredContributions.length}`} />
+        <MetricCard icon={<Users />} label="Filtered member" value={selectedMemberName} />
+      </div>
+      {filteredContributions.length === 0 ? (
+        <EmptyState text="No approved contributions match these filters." />
+      ) : (
+        <div className="table-wrap">
+          <table>
+            <thead>
+              <tr>
+                <th>Payment date</th>
+                <th>Member</th>
+                <th>BDT</th>
+                <th>Method</th>
+                <th>Receipt</th>
+                <th>Reviewed</th>
+              </tr>
+            </thead>
+            <tbody>
+              {filteredContributions.map((contribution) => (
+                <tr key={contribution.id}>
+                  <td data-label="Payment date">{formatDate(contribution.payment_date)}</td>
+                  <td data-label="Member">{getContributionMemberName(contribution)}</td>
+                  <td data-label="BDT">{formatBdt(Number(contribution.bdt_amount))}</td>
+                  <td data-label="Method">{contribution.payment_method || contribution.sent_from_country || "Not set"}</td>
+                  <td data-label="Receipt"><ReceiptLink contribution={contribution} onOpenReceipt={onOpenReceipt} /></td>
+                  <td data-label="Reviewed">{formatDate(contribution.reviewed_at)}</td>
+                </tr>
+              ))}
+            </tbody>
+          </table>
+        </div>
+      )}
+    </section>
+  );
+}
+
+function MemberManagementPanel({ projectId, currentUserId, members, loading, onReload, onError }: {
+  projectId: string;
+  currentUserId: string;
+  members: MemberRecord[];
+  loading: boolean;
+  onReload: () => Promise<void>;
+  onError: (message: string) => void;
+}) {
+  const [search, setSearch] = useState("");
+  const [message, setMessage] = useState<string | null>(null);
 
   const filteredMembers = members.filter((member) => {
     const haystack = `${member.full_name} ${member.email ?? ""} ${member.phone ?? ""} ${member.resident_country ?? ""} ${member.membership?.member_code ?? ""}`.toLowerCase();
@@ -635,7 +1388,7 @@ function MemberManagementPanel({ projectId, currentUserId, onError }: {
         <span className="count-badge">{members.length} users</span>
       </div>
       <p className="helper-text">
-        Members appear here after they create an account. Admins can then set role and project membership details.
+        Member accounts can hold project membership details. Admin accounts are access-only and cannot be saved as project members.
       </p>
       <div className="member-toolbar">
         <input
@@ -659,7 +1412,7 @@ function MemberManagementPanel({ projectId, currentUserId, onError }: {
               isCurrentUser={member.id === currentUserId}
               onSaved={async () => {
                 setMessage("Member saved.");
-                await loadMembers();
+                await onReload();
               }}
               onError={onError}
             />
@@ -685,8 +1438,9 @@ function MemberEditor({ member, projectId, isCurrentUser, onSaved, onError }: {
   const [role, setRole] = useState<ProfileRole>(member.role);
   const [memberCode, setMemberCode] = useState(member.membership?.member_code ?? "");
   const [joinedAt, setJoinedAt] = useState(member.membership?.joined_at ?? new Date().toISOString().slice(0, 10));
-  const [status, setStatus] = useState<MembershipStatus>(member.membership?.status ?? "active");
+  const [status, setStatus] = useState<MembershipStatus>(getEffectiveMembershipStatus(member));
   const [busy, setBusy] = useState(false);
+  const isAdminRole = role === "admin";
 
   useEffect(() => {
     const nextPhone = splitPhoneNumber(member.phone);
@@ -698,7 +1452,7 @@ function MemberEditor({ member, projectId, isCurrentUser, onSaved, onError }: {
     setRole(member.role);
     setMemberCode(member.membership?.member_code ?? "");
     setJoinedAt(member.membership?.joined_at ?? new Date().toISOString().slice(0, 10));
-    setStatus(member.membership?.status ?? "active");
+    setStatus(getEffectiveMembershipStatus(member));
   }, [member]);
 
   async function save(event: React.FormEvent<HTMLFormElement>) {
@@ -712,9 +1466,9 @@ function MemberEditor({ member, projectId, isCurrentUser, onSaved, onError }: {
         phone: joinPhoneNumber(phoneCode, phone),
         residentCountry: country || null,
         role,
-        memberCode: memberCode.trim() || null,
+        memberCode: isAdminRole ? null : memberCode.trim() || null,
         joinedAt,
-        status,
+        status: isAdminRole ? "left" : status,
       });
       await onSaved();
     } catch (err) {
@@ -731,7 +1485,7 @@ function MemberEditor({ member, projectId, isCurrentUser, onSaved, onError }: {
           <h3>{member.full_name || member.email || "Unnamed member"}</h3>
           <p>{member.email ?? "No email"}{isCurrentUser ? " / current admin" : ""}</p>
         </div>
-        <StatusPill status={status === "active" ? "approved" : status === "paused" ? "pending" : "rejected"} />
+        <RolePill role={role} status={status} />
       </div>
       <div className="member-card-grid">
         <label>
@@ -763,22 +1517,28 @@ function MemberEditor({ member, projectId, isCurrentUser, onSaved, onError }: {
             <option value="admin">Admin</option>
           </select>
         </label>
-        <label>
-          Member code
-          <input value={memberCode} onChange={(event) => setMemberCode(event.target.value)} placeholder="M-001" />
-        </label>
-        <label>
-          Joined date
-          <input type="date" value={joinedAt} onChange={(event) => setJoinedAt(event.target.value)} />
-        </label>
-        <label>
-          Status
-          <select value={status} onChange={(event) => setStatus(event.target.value as MembershipStatus)}>
-            <option value="active">Active</option>
-            <option value="paused">Paused</option>
-            <option value="left">Left</option>
-          </select>
-        </label>
+        {isAdminRole ? (
+          <p className="admin-member-note">Admin access only. Saving removes this account from project membership.</p>
+        ) : (
+          <>
+            <label>
+              Member code
+              <input value={memberCode} onChange={(event) => setMemberCode(event.target.value)} placeholder="M-001" />
+            </label>
+            <label>
+              Joined date
+              <input type="date" value={joinedAt} onChange={(event) => setJoinedAt(event.target.value)} />
+            </label>
+            <label>
+              Status
+              <select value={status} onChange={(event) => setStatus(event.target.value as MembershipStatus)}>
+                <option value="active">Active</option>
+                <option value="paused">Paused</option>
+                <option value="left">Left</option>
+              </select>
+            </label>
+          </>
+        )}
       </div>
       <button className="secondary-button" type="submit" disabled={busy}>
         {busy ? "Saving" : "Save member"}
@@ -942,6 +1702,26 @@ function ContributionTable({ title, contributions, admin = false }: {
   );
 }
 
+function ReceiptLink({ contribution, onOpenReceipt }: {
+  contribution: Contribution;
+  onOpenReceipt: (contribution: Contribution) => Promise<void>;
+}) {
+  const receipt = contribution.payment_receipts?.[0];
+  if (!receipt) return <span>Missing</span>;
+
+  return (
+    <button className="receipt-link" type="button" onClick={() => void onOpenReceipt(contribution)}>
+      {receipt.file_name}
+    </button>
+  );
+}
+
+function RolePill({ role, status }: { role: ProfileRole; status: MembershipStatus }) {
+  if (role === "admin") return <span className="status-pill admin"><ShieldCheck size={14} /> Admin</span>;
+  if (role === "viewer") return <span className="status-pill viewer"><UserRound size={14} /> Viewer</span>;
+  return <StatusPill status={status === "active" ? "approved" : status === "paused" ? "pending" : "rejected"} />;
+}
+
 function StatusPill({ status }: { status: Contribution["status"] }) {
   const Icon = status === "approved" ? CheckCircle2 : status === "rejected" ? XCircle : Clock3;
   return <span className={`status-pill ${status}`}><Icon size={14} /> {status}</span>;
@@ -995,8 +1775,15 @@ function SetupNotice() {
   );
 }
 
-function PageShell({ children, compact = false }: { children: React.ReactNode; compact?: boolean }) {
-  return <div className={compact ? "page-shell compact" : "page-shell"}>{children}</div>;
+function PageShell({ children, compact = false, adminShell = false }: {
+  children: React.ReactNode;
+  compact?: boolean;
+  adminShell?: boolean;
+}) {
+  const className = ["page-shell", compact ? "compact" : "", adminShell ? "admin-shell" : ""]
+    .filter(Boolean)
+    .join(" ");
+  return <div className={className}>{children}</div>;
 }
 
 export default App;

@@ -155,6 +155,85 @@ $$;
 revoke all on function private.current_user_role() from public;
 grant execute on function private.current_user_role() to authenticated;
 
+create or replace function private.current_user_can_read_project(target_project_id uuid)
+returns boolean
+language sql
+security definer
+set search_path = ''
+stable
+as $$
+  select exists (
+    select 1
+    from public.group_members
+    where project_id = target_project_id
+      and user_id = (select auth.uid())
+      and status <> 'left'
+  )
+$$;
+
+create or replace function private.current_user_can_read_member(target_user_id uuid)
+returns boolean
+language sql
+security definer
+set search_path = ''
+stable
+as $$
+  select exists (
+    select 1
+    from public.group_members viewer_membership
+    join public.group_members target_membership
+      on target_membership.project_id = viewer_membership.project_id
+    where viewer_membership.user_id = (select auth.uid())
+      and viewer_membership.status <> 'left'
+      and target_membership.user_id = target_user_id
+      and target_membership.status <> 'left'
+  )
+$$;
+
+create or replace function private.current_user_can_read_approved_contribution(target_contribution_id uuid)
+returns boolean
+language sql
+security definer
+set search_path = ''
+stable
+as $$
+  select exists (
+    select 1
+    from public.contributions
+    where id = target_contribution_id
+      and status = 'approved'
+      and private.current_user_can_read_project(project_id)
+  )
+$$;
+
+create or replace function private.current_user_can_read_receipt_file(target_bucket text, target_path text)
+returns boolean
+language sql
+security definer
+set search_path = ''
+stable
+as $$
+  select exists (
+    select 1
+    from public.payment_receipts receipt
+    join public.contributions approved_contribution
+      on approved_contribution.id = receipt.contribution_id
+    where receipt.storage_bucket = target_bucket
+      and receipt.storage_path = target_path
+      and approved_contribution.status = 'approved'
+      and private.current_user_can_read_project(approved_contribution.project_id)
+  )
+$$;
+
+revoke all on function private.current_user_can_read_project(uuid) from public;
+revoke all on function private.current_user_can_read_member(uuid) from public;
+revoke all on function private.current_user_can_read_approved_contribution(uuid) from public;
+revoke all on function private.current_user_can_read_receipt_file(text, text) from public;
+grant execute on function private.current_user_can_read_project(uuid) to authenticated;
+grant execute on function private.current_user_can_read_member(uuid) to authenticated;
+grant execute on function private.current_user_can_read_approved_contribution(uuid) to authenticated;
+grant execute on function private.current_user_can_read_receipt_file(text, text) to authenticated;
+
 drop trigger if exists set_profiles_updated_at on public.profiles;
 create trigger set_profiles_updated_at
 before update on public.profiles
@@ -187,7 +266,7 @@ alter table public.audit_logs enable row level security;
 grant usage on schema public to anon, authenticated;
 grant select, update on public.investment_projects to authenticated;
 grant select, insert, update on public.profiles to authenticated;
-grant select, insert, update on public.group_members to authenticated;
+grant select, insert, update, delete on public.group_members to authenticated;
 grant select, insert, update on public.contributions to authenticated;
 grant select, insert on public.payment_receipts to authenticated;
 grant select on public.exchange_rates to authenticated;
@@ -218,6 +297,12 @@ on public.profiles for select
 to authenticated
 using ((select private.current_user_role()) = 'admin');
 
+drop policy if exists "members can read project member profiles" on public.profiles;
+create policy "members can read project member profiles"
+on public.profiles for select
+to authenticated
+using (private.current_user_can_read_member(public.profiles.id));
+
 drop policy if exists "users can update own profile" on public.profiles;
 create policy "users can update own profile"
 on public.profiles for update
@@ -244,6 +329,12 @@ on public.group_members for select
 to authenticated
 using (user_id = (select auth.uid()));
 
+drop policy if exists "members can read project memberships" on public.group_members;
+create policy "members can read project memberships"
+on public.group_members for select
+to authenticated
+using (private.current_user_can_read_project(public.group_members.project_id));
+
 drop policy if exists "admins can manage memberships" on public.group_members;
 create policy "admins can manage memberships"
 on public.group_members for all
@@ -256,6 +347,12 @@ create policy "members can read own contributions"
 on public.contributions for select
 to authenticated
 using (member_id = (select auth.uid()));
+
+drop policy if exists "members can read approved project contributions" on public.contributions;
+create policy "members can read approved project contributions"
+on public.contributions for select
+to authenticated
+using (status = 'approved' and private.current_user_can_read_project(public.contributions.project_id));
 
 drop policy if exists "members can create own pending contributions" on public.contributions;
 create policy "members can create own pending contributions"
@@ -275,6 +372,12 @@ create policy "members can read own receipts"
 on public.payment_receipts for select
 to authenticated
 using (uploaded_by = (select auth.uid()));
+
+drop policy if exists "members can read approved project receipts" on public.payment_receipts;
+create policy "members can read approved project receipts"
+on public.payment_receipts for select
+to authenticated
+using (private.current_user_can_read_approved_contribution(public.payment_receipts.contribution_id));
 
 drop policy if exists "members can insert own receipts" on public.payment_receipts;
 create policy "members can insert own receipts"
@@ -329,6 +432,15 @@ to authenticated
 using (
   bucket_id = 'payment-receipts'
   and (storage.foldername(name))[1] = (select auth.uid())::text
+);
+
+drop policy if exists "members can read approved project receipt files" on storage.objects;
+create policy "members can read approved project receipt files"
+on storage.objects for select
+to authenticated
+using (
+  bucket_id = 'payment-receipts'
+  and private.current_user_can_read_receipt_file(storage.objects.bucket_id, storage.objects.name)
 );
 
 drop policy if exists "admins can read all receipt files" on storage.objects;

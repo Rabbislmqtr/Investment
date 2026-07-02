@@ -38,6 +38,19 @@ button {
   padding: 28px 0 48px;
 }
 
+.page-shell.admin-shell {
+  width: 100%;
+  margin: 0;
+  padding: 28px 32px 48px 336px;
+}
+
+.page-shell.admin-shell .app-header,
+.page-shell.admin-shell .admin-layout {
+  width: min(100%, 1560px);
+  margin-left: auto;
+  margin-right: auto;
+}
+
 .page-shell.compact {
   min-height: 100vh;
   display: grid;
@@ -229,6 +242,9 @@ button {
   background: #f7faf8;
   font-size: 0.8rem;
   font-weight: 800;
+  display: inline-flex;
+  align-items: center;
+  gap: 6px;
 }
 
 label {
@@ -414,6 +430,178 @@ button:disabled {
   align-items: start;
 }
 
+.admin-layout {
+  display: block;
+}
+
+.admin-menu-button,
+.admin-sidebar-backdrop {
+  display: none;
+}
+
+.admin-sidebar {
+  position: fixed;
+  inset: 0 auto 0 0;
+  width: 304px;
+  height: 100vh;
+  border: 1px solid #dce4df;
+  border-top: 0;
+  border-bottom: 0;
+  border-left: 0;
+  border-radius: 0;
+  background: #ffffff;
+  box-shadow: 0 12px 30px rgba(29, 39, 35, 0.055);
+  padding: 28px 18px;
+  overflow-y: auto;
+  z-index: 20;
+}
+
+.admin-sidebar-head {
+  display: flex;
+  gap: 10px;
+  align-items: center;
+  padding-bottom: 14px;
+  border-bottom: 1px solid #edf1ef;
+  margin-bottom: 12px;
+}
+
+.admin-sidebar-head h2,
+.admin-sidebar-head p {
+  margin: 0;
+}
+
+.admin-sidebar-head h2 {
+  font-size: 1rem;
+  color: #16352b;
+}
+
+.admin-sidebar-head p {
+  margin-top: 3px;
+  color: #687970;
+  font-size: 0.82rem;
+  font-weight: 700;
+}
+
+.admin-nav {
+  display: grid;
+  gap: 6px;
+}
+
+.admin-nav button {
+  width: 100%;
+  border: 0;
+  border-radius: 8px;
+  background: transparent;
+  color: #46574f;
+  display: grid;
+  grid-template-columns: 30px 1fr;
+  gap: 2px 9px;
+  align-items: center;
+  padding: 10px;
+  text-align: left;
+}
+
+.admin-nav button span {
+  grid-row: span 2;
+  width: 30px;
+  height: 30px;
+  border-radius: 8px;
+  display: grid;
+  place-items: center;
+  background: #eef4f1;
+  color: #16352b;
+}
+
+.admin-nav button strong,
+.admin-nav button small {
+  min-width: 0;
+  overflow-wrap: anywhere;
+}
+
+.admin-nav button strong {
+  font-size: 0.9rem;
+}
+
+.admin-nav button small {
+  color: #718078;
+  font-weight: 700;
+}
+
+.admin-nav button.active {
+  background: #16352b;
+  color: #ffffff;
+}
+
+.admin-nav button.active span {
+  background: #2f8060;
+  color: #ffffff;
+}
+
+.admin-nav button.active small {
+  color: #dce9e3;
+}
+
+.admin-content {
+  min-width: 0;
+  overflow: hidden;
+}
+
+.admin-page-stack {
+  display: grid;
+  gap: 16px;
+}
+
+.admin-metric-grid {
+  display: grid;
+  grid-template-columns: repeat(4, minmax(0, 1fr));
+  gap: 12px;
+}
+
+.admin-metric-grid .metric-card {
+  min-height: 114px;
+  box-shadow: none;
+  background: #fbfcfb;
+}
+
+.compact-progress {
+  margin: 14px 0 0;
+  box-shadow: none;
+  background: #fbfcfb;
+}
+
+.overview-grid {
+  display: grid;
+  grid-template-columns: repeat(2, minmax(0, 1fr));
+  gap: 16px;
+}
+
+.insight-list {
+  display: grid;
+  gap: 10px;
+}
+
+.insight-row {
+  display: flex;
+  justify-content: space-between;
+  gap: 12px;
+  align-items: center;
+  border: 1px solid #edf1ef;
+  border-radius: 8px;
+  padding: 11px 12px;
+  background: #fbfcfb;
+}
+
+.insight-row span {
+  color: #62736b;
+  font-weight: 700;
+}
+
+.insight-row strong {
+  color: #1d2723;
+  text-align: right;
+  overflow-wrap: anywhere;
+}
+
 .wide {
   grid-column: 1 / -1;
 }
@@ -426,6 +614,26 @@ button:disabled {
   display: grid;
   grid-template-columns: repeat(2, minmax(0, 1fr));
   gap: 0 14px;
+}
+
+.report-toolbar {
+  display: grid;
+  grid-template-columns: minmax(180px, 260px) minmax(220px, 1fr);
+  gap: 12px;
+  align-items: end;
+}
+
+.report-summary {
+  display: grid;
+  grid-template-columns: repeat(3, minmax(0, 1fr));
+  gap: 12px;
+  margin: 2px 0 16px;
+}
+
+.report-summary .metric-card {
+  min-height: 112px;
+  box-shadow: none;
+  background: #fbfcfb;
 }
 
 .file-picker {
@@ -481,6 +689,21 @@ th {
   letter-spacing: 0;
 }
 
+.receipt-link {
+  border: 0;
+  background: transparent;
+  color: #165f43;
+  padding: 0;
+  font-weight: 800;
+  text-align: left;
+  text-decoration: underline;
+  text-underline-offset: 3px;
+}
+
+.receipt-link:hover {
+  color: #0e3d2c;
+}
+
 .status-pill {
   display: inline-flex;
   align-items: center;
@@ -505,6 +728,16 @@ th {
 .status-pill.rejected {
   background: #fee7e7;
   color: #9d2424;
+}
+
+.status-pill.admin {
+  background: #e5efe9;
+  color: #16352b;
+}
+
+.status-pill.viewer {
+  background: #e9eef3;
+  color: #334155;
 }
 
 .review-list {
@@ -595,6 +828,22 @@ th {
   margin-top: 2px;
 }
 
+.admin-member-note {
+  align-self: end;
+  min-height: 44px;
+  display: flex;
+  align-items: center;
+  grid-column: span 3;
+  margin: 0 0 13px;
+  border: 1px solid #d7dfdb;
+  border-radius: 8px;
+  padding: 10px 12px;
+  background: #f7faf8;
+  color: #52635c;
+  font-weight: 700;
+  line-height: 1.45;
+}
+
 .inline-notice {
   display: flex;
   align-items: center;
@@ -646,9 +895,92 @@ th {
   gap: 8px;
 }
 
+@media (max-width: 1279px) {
+  .page-shell.admin-shell {
+    width: min(100% - 40px, 1120px);
+    margin: 0 auto;
+    padding: 28px 0 48px;
+  }
+
+  .page-shell.admin-shell .app-header,
+  .page-shell.admin-shell .admin-layout {
+    width: auto;
+    margin-left: 0;
+    margin-right: 0;
+  }
+
+  .admin-menu-button {
+    position: fixed;
+    top: 18px;
+    left: 18px;
+    z-index: 34;
+    width: 48px;
+    height: 48px;
+    border: 1px solid #d4dfd9;
+    border-radius: 8px;
+    padding: 0;
+    display: inline-flex;
+    align-items: center;
+    justify-content: center;
+    gap: 9px;
+    background: #16352b;
+    color: #ffffff;
+    box-shadow: 0 16px 34px rgba(22, 53, 43, 0.22);
+    font-weight: 800;
+  }
+
+  .admin-menu-button span {
+    position: absolute;
+    width: 1px;
+    height: 1px;
+    overflow: hidden;
+    clip: rect(0 0 0 0);
+  }
+
+  .admin-sidebar-backdrop {
+    position: fixed;
+    inset: 0;
+    z-index: 29;
+    display: block;
+    border: 0;
+    background: rgba(14, 28, 23, 0.38);
+  }
+
+  .admin-sidebar {
+    inset: 0 auto 0 0;
+    width: min(326px, calc(100vw - 36px));
+    transform: translateX(-105%);
+    transition: transform 180ms ease;
+    border-right: 1px solid #dce4df;
+    z-index: 33;
+  }
+
+  .admin-sidebar.open {
+    transform: translateX(0);
+  }
+
+  .admin-metric-grid {
+    grid-template-columns: repeat(2, minmax(0, 1fr));
+  }
+}
+
 @media (max-width: 900px) {
+  .page-shell.admin-shell {
+    width: min(1240px, calc(100% - 32px));
+    margin: 0 auto;
+    padding: 28px 0 48px;
+  }
+
+  .page-shell.admin-shell .app-header,
+  .page-shell.admin-shell .admin-layout {
+    width: auto;
+    margin-left: 0;
+    margin-right: 0;
+  }
+
   .auth-layout,
-  .dashboard-grid {
+  .dashboard-grid,
+  .admin-layout {
     grid-template-columns: 1fr;
   }
 
@@ -684,10 +1016,35 @@ th {
   .member-card-grid {
     grid-template-columns: repeat(2, minmax(0, 1fr));
   }
+
+  .admin-nav {
+    grid-template-columns: 1fr;
+    overflow-x: visible;
+    padding-bottom: 0;
+  }
+
+  .admin-metric-grid,
+  .overview-grid {
+    grid-template-columns: repeat(2, minmax(0, 1fr));
+  }
+
+  .admin-member-note {
+    grid-column: span 2;
+  }
+
+  .report-summary {
+    grid-template-columns: 1fr;
+  }
 }
 
 @media (max-width: 560px) {
   .page-shell {
+    width: min(100% - 16px, 1180px);
+    padding-top: 16px;
+    padding-bottom: 28px;
+  }
+
+  .page-shell.admin-shell {
     width: min(100% - 16px, 1180px);
     padding-top: 16px;
     padding-bottom: 28px;
@@ -713,6 +1070,25 @@ th {
     gap: 8px;
   }
 
+  .admin-nav {
+    grid-template-columns: 1fr;
+  }
+
+  .admin-nav button {
+    grid-template-columns: 28px 1fr;
+    padding: 9px;
+  }
+
+  .admin-nav button span {
+    width: 28px;
+    height: 28px;
+  }
+
+  .admin-metric-grid,
+  .overview-grid {
+    grid-template-columns: 1fr;
+  }
+
   .metric-card {
     min-height: 108px;
   }
@@ -732,6 +1108,10 @@ th {
   }
 
   .form-grid {
+    grid-template-columns: 1fr;
+  }
+
+  .report-toolbar {
     grid-template-columns: 1fr;
   }
 
@@ -777,6 +1157,10 @@ th {
 
   .member-card-grid {
     grid-template-columns: 1fr;
+  }
+
+  .admin-member-note {
+    grid-column: span 1;
   }
 
   .member-card .secondary-button {

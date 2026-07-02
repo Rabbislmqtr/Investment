@@ -2,6 +2,7 @@ import type {
   Contribution,
   DashboardTotals,
   InvestmentProject,
+  MemberPaymentStatus,
   MemberRecord,
   MembershipStatus,
   PaymentReceipt,
@@ -119,6 +120,17 @@ export async function updateMemberRecord(input: {
 
   if (profileError) throw profileError;
 
+  if (input.role === "admin") {
+    const { error: membershipDeleteError } = await supabase
+      .from("group_members")
+      .delete()
+      .eq("project_id", input.projectId)
+      .eq("user_id", input.userId);
+
+    if (membershipDeleteError) throw membershipDeleteError;
+    return;
+  }
+
   const { error: membershipError } = await supabase
     .from("group_members")
     .upsert(
@@ -150,11 +162,87 @@ export async function getMemberContributions(memberId: string): Promise<Contribu
   return data ?? [];
 }
 
+export async function getMemberPaymentStatus(projectId: string, month: string): Promise<MemberPaymentStatus[]> {
+  const monthStart = `${month}-01`;
+  const nextMonth = new Date(`${monthStart}T00:00:00`);
+  nextMonth.setMonth(nextMonth.getMonth() + 1);
+  const nextMonthStart = nextMonth.toISOString().slice(0, 10);
+
+  const { data: memberships, error: membershipsError } = await supabase
+    .from("group_members")
+    .select("id, project_id, user_id, member_code, joined_at, status")
+    .eq("project_id", projectId)
+    .neq("status", "left")
+    .order("member_code", { ascending: true });
+
+  if (membershipsError) throw membershipsError;
+
+  const memberIds = (memberships ?? []).map((membership) => membership.user_id);
+  if (memberIds.length === 0) return [];
+
+  const [{ data: profiles, error: profilesError }, { data: contributions, error: contributionsError }] = await Promise.all([
+    supabase
+      .from("profiles")
+      .select("id, full_name, email, phone, resident_country, role")
+      .in("id", memberIds),
+    supabase
+      .from("contributions")
+      .select("id, member_id, payment_date, bdt_amount, payment_method, payment_receipts(file_name, storage_path)")
+      .eq("project_id", projectId)
+      .eq("status", "approved")
+      .gte("payment_date", monthStart)
+      .lt("payment_date", nextMonthStart),
+  ]);
+
+  if (profilesError) throw profilesError;
+  if (contributionsError) throw contributionsError;
+
+  type StatusContribution = NonNullable<typeof contributions>[number];
+
+  const profileById = new Map((profiles ?? []).map((profile) => [profile.id, profile]));
+  const contributionsByMember = new Map<string, StatusContribution[]>();
+  (contributions ?? []).forEach((contribution) => {
+    const entries = contributionsByMember.get(contribution.member_id) ?? [];
+    entries.push(contribution);
+    contributionsByMember.set(contribution.member_id, entries);
+  });
+
+  return (memberships ?? [])
+    .map((membership) => {
+      const profile = profileById.get(membership.user_id);
+      const memberContributions = contributionsByMember.get(membership.user_id) ?? [];
+      const sortedContributions = memberContributions
+        .slice()
+        .sort((a, b) => b.payment_date.localeCompare(a.payment_date));
+      const approvedTotalBdt = memberContributions.reduce((sum, contribution) => sum + Number(contribution.bdt_amount), 0);
+      const lastContribution = sortedContributions[0];
+
+      return {
+        memberId: membership.user_id,
+        memberName: profile?.full_name || profile?.email || "Member",
+        email: profile?.email ?? null,
+        memberCode: membership.member_code,
+        membershipStatus: membership.status,
+        paid: approvedTotalBdt > 0,
+        approvedTotalBdt,
+        paymentCount: memberContributions.length,
+        lastPaymentDate: lastContribution?.payment_date ?? null,
+        lastPaymentMethod: lastContribution?.payment_method ?? null,
+        receiptFileName: lastContribution?.payment_receipts?.[0]?.file_name ?? null,
+        receiptStoragePath: lastContribution?.payment_receipts?.[0]?.storage_path ?? null,
+      };
+    })
+    .sort((a, b) => {
+      if (a.paid !== b.paid) return a.paid ? -1 : 1;
+      return a.memberName.localeCompare(b.memberName);
+    });
+}
+
 export async function getAdminContributions(): Promise<Contribution[]> {
   const { data, error } = await supabase
     .from("contributions")
     .select(
-      "*, member:profiles!contributions_member_id_fkey(full_name, email), payment_receipts(id, contribution_id, uploaded_by, storage_bucket, storage_path, file_name, file_type, file_size, created_at)",
+      "*, member:profiles!contributions_member_id_fkey(full_name, email, role), payment_receipts(id, contribution_id, uploaded_by, storage_bucket, storage_path, file_name, file_type, file_size, created_at)",
     )
     .order("created_at", { ascending: false });
 

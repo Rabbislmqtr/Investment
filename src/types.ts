@@ -33,6 +33,21 @@ export type MemberRecord = Profile & {
   membership: GroupMember | null;
 };
 
+export type MemberPaymentStatus = {
+  memberId: string;
+  memberName: string;
+  email: string | null;
+  memberCode: string | null;
+  membershipStatus: MembershipStatus;
+  paid: boolean;
+  approvedTotalBdt: number;
+  paymentCount: number;
+  lastPaymentDate: string | null;
+  lastPaymentMethod: string | null;
+  receiptFileName: string | null;
+  receiptStoragePath: string | null;
+};
+
 export type Contribution = {
   id: string;
   project_id: string;
@@ -50,8 +65,8 @@ export type Contribution = {
   reviewed_at: string | null;
   rejection_reason: string | null;
   created_at: string;
-  member?: Pick<Profile, "full_name" | "email"> | null;
-  profiles?: Pick<Profile, "full_name" | "email"> | null;
+  member?: Pick<Profile, "full_name" | "email" | "role"> | null;
+  profiles?: Pick<Profile, "full_name" | "email" | "role"> | null;
   payment_receipts?: PaymentReceipt[];
 };
 
