@@ -1,5 +1,6 @@
 export type ProfileRole = "member" | "admin" | "viewer";
 export type ContributionStatus = "pending" | "approved" | "rejected";
+export type MembershipStatus = "active" | "paused" | "left";
 
 export type Profile = {
   id: string;
@@ -17,6 +18,19 @@ export type InvestmentProject = {
   target_amount_bdt: number;
   currency_code: string;
   is_active: boolean;
+};
+
+export type GroupMember = {
+  id: string;
+  project_id: string;
+  user_id: string;
+  member_code: string | null;
+  joined_at: string;
+  status: MembershipStatus;
+};
+
+export type MemberRecord = Profile & {
+  membership: GroupMember | null;
 };
 
 export type Contribution = {

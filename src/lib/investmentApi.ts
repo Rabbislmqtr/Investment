@@ -1,4 +1,13 @@
-import type { Contribution, DashboardTotals, InvestmentProject, PaymentReceipt, Profile } from "../types";
+import type {
+  Contribution,
+  DashboardTotals,
+  InvestmentProject,
+  MemberRecord,
+  MembershipStatus,
+  PaymentReceipt,
+  Profile,
+  ProfileRole,
+} from "../types";
 import { supabase } from "./supabase";
 
 const RECEIPT_BUCKET = "payment-receipts";
@@ -60,6 +69,72 @@ export async function updateProjectSettings(input: {
     .single();
 
   if (error) throw error;
+}
+
+export async function getAdminMembers(projectId: string): Promise<MemberRecord[]> {
+  const [{ data: profiles, error: profilesError }, { data: memberships, error: membershipsError }] = await Promise.all([
+    supabase
+      .from("profiles")
+      .select("id, full_name, email, phone, resident_country, role")
+      .order("full_name", { ascending: true }),
+    supabase
+      .from("group_members")
+      .select("id, project_id, user_id, member_code, joined_at, status")
+      .eq("project_id", projectId),
+  ]);
+
+  if (profilesError) throw profilesError;
+  if (membershipsError) throw membershipsError;
+
+  const membershipByUser = new Map((memberships ?? []).map((membership) => [membership.user_id, membership]));
+
+  return (profiles ?? []).map((profile) => ({
+    ...profile,
+    membership: membershipByUser.get(profile.id) ?? null,
+  })) as MemberRecord[];
+}
+
+export async function updateMemberRecord(input: {
+  projectId: string;
+  userId: string;
+  fullName: string;
+  phone: string | null;
+  residentCountry: string | null;
+  role: ProfileRole;
+  memberCode: string | null;
+  joinedAt: string;
+  status: MembershipStatus;
+}) {
+  const { error: profileError } = await supabase
+    .from("profiles")
+    .update({
+      full_name: input.fullName,
+      phone: input.phone,
+      resident_country: input.residentCountry,
+      role: input.role,
+    })
+    .eq("id", input.userId)
+    .select("id")
+    .single();
+
+  if (profileError) throw profileError;
+
+  const { error: membershipError } = await supabase
+    .from("group_members")
+    .upsert(
+      {
+        project_id: input.projectId,
+        user_id: input.userId,
+        member_code: input.memberCode,
+        joined_at: input.joinedAt,
+        status: input.status,
+      },
+      { onConflict: "project_id,user_id" },
+    )
+    .select("id")
+    .single();
+
+  if (membershipError) throw membershipError;
 }
 
 export async function getMemberContributions(memberId: string): Promise<Contribution[]> {

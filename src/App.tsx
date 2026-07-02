@@ -14,19 +14,22 @@ import {
   Settings,
   ShieldCheck,
   Upload,
+  Users,
   UserRound,
   XCircle,
 } from "lucide-react";
-import type { Contribution, InvestmentProject, Profile } from "./types";
+import type { Contribution, InvestmentProject, MemberRecord, MembershipStatus, Profile, ProfileRole } from "./types";
 import {
   calculateTotals,
   getActiveProject,
   getAdminContributions,
+  getAdminMembers,
   getCurrentProfile,
   getMemberContributions,
   getSignedReceiptUrl,
   reviewContribution,
   submitContribution,
+  updateMemberRecord,
   updateProjectSettings,
   updateProfile,
 } from "./lib/investmentApi";
@@ -135,6 +138,7 @@ function InvestmentApp({ session }: { session: Session }) {
   }
 
   useEffect(() => {
+    // eslint-disable-next-line react-hooks/set-state-in-effect
     void loadData("member");
     // eslint-disable-next-line react-hooks/exhaustive-deps
   }, [session.user.id]);
@@ -204,6 +208,7 @@ function InvestmentApp({ session }: { session: Session }) {
           project={project}
           contributions={contributions}
           reviewerId={session.user.id}
+          currentUserId={session.user.id}
           onProjectSaved={async () => {
             setMessage("Project setup saved.");
             await loadData("admin");
@@ -340,6 +345,7 @@ function ProfilePanel({ userId, profile, onSaved, onError }: {
 
   useEffect(() => {
     const parsedPhone = splitPhoneNumber(profile?.phone);
+    // eslint-disable-next-line react-hooks/set-state-in-effect
     setFullName(profile?.full_name ?? "");
     setPhoneCode(parsedPhone.code);
     setPhone(parsedPhone.number);
@@ -519,10 +525,11 @@ function PaymentForm({ userId, project, onSubmitted, onError }: {
   );
 }
 
-function AdminDashboard({ project, contributions, reviewerId, onProjectSaved, onReviewed, onError }: {
+function AdminDashboard({ project, contributions, reviewerId, currentUserId, onProjectSaved, onReviewed, onError }: {
   project: InvestmentProject | null;
   contributions: Contribution[];
   reviewerId: string;
+  currentUserId: string;
   onProjectSaved: () => Promise<void>;
   onReviewed: (message: string) => Promise<void>;
   onError: (message: string) => void;
@@ -554,6 +561,13 @@ function AdminDashboard({ project, contributions, reviewerId, onProjectSaved, on
           onError={onError}
         />
       )}
+      {project && (
+        <MemberManagementPanel
+          projectId={project.id}
+          currentUserId={currentUserId}
+          onError={onError}
+        />
+      )}
       <section className="panel wide">
         <div className="panel-title">
           <ShieldCheck size={20} />
@@ -579,6 +593,200 @@ function AdminDashboard({ project, contributions, reviewerId, onProjectSaved, on
   );
 }
 
+function MemberManagementPanel({ projectId, currentUserId, onError }: {
+  projectId: string;
+  currentUserId: string;
+  onError: (message: string) => void;
+}) {
+  const [members, setMembers] = useState<MemberRecord[]>([]);
+  const [search, setSearch] = useState("");
+  const [loading, setLoading] = useState(true);
+  const [message, setMessage] = useState<string | null>(null);
+
+  async function loadMembers() {
+    setLoading(true);
+    try {
+      setMembers(await getAdminMembers(projectId));
+    } catch (err) {
+      onError(getErrorMessage(err, "Could not load members."));
+    } finally {
+      setLoading(false);
+    }
+  }
+
+  useEffect(() => {
+    // eslint-disable-next-line react-hooks/set-state-in-effect
+    void loadMembers();
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [projectId]);
+
+  const filteredMembers = members.filter((member) => {
+    const haystack = `${member.full_name} ${member.email ?? ""} ${member.phone ?? ""} ${member.resident_country ?? ""} ${member.membership?.member_code ?? ""}`.toLowerCase();
+    return haystack.includes(search.toLowerCase().trim());
+  });
+
+  return (
+    <section className="panel wide">
+      <div className="panel-title split-title">
+        <div>
+          <span className="title-icon"><Users size={20} /></span>
+          <h2>Member management</h2>
+        </div>
+        <span className="count-badge">{members.length} users</span>
+      </div>
+      <p className="helper-text">
+        Members appear here after they create an account. Admins can then set role and project membership details.
+      </p>
+      <div className="member-toolbar">
+        <input
+          value={search}
+          onChange={(event) => setSearch(event.target.value)}
+          placeholder="Search name, email, phone, country, or member code"
+        />
+      </div>
+      {message && <InlineNotice tone="success" text={message} onClose={() => setMessage(null)} />}
+      {loading ? (
+        <StatusMessage title="Loading members" body="Reading account and membership records." />
+      ) : filteredMembers.length === 0 ? (
+        <EmptyState text="No members match this search." />
+      ) : (
+        <div className="member-list">
+          {filteredMembers.map((member) => (
+            <MemberEditor
+              key={member.id}
+              member={member}
+              projectId={projectId}
+              isCurrentUser={member.id === currentUserId}
+              onSaved={async () => {
+                setMessage("Member saved.");
+                await loadMembers();
+              }}
+              onError={onError}
+            />
+          ))}
+        </div>
+      )}
+    </section>
+  );
+}
+
+function MemberEditor({ member, projectId, isCurrentUser, onSaved, onError }: {
+  member: MemberRecord;
+  projectId: string;
+  isCurrentUser: boolean;
+  onSaved: () => Promise<void>;
+  onError: (message: string) => void;
+}) {
+  const parsedPhone = splitPhoneNumber(member.phone);
+  const [fullName, setFullName] = useState(member.full_name);
+  const [phoneCode, setPhoneCode] = useState(parsedPhone.code);
+  const [phone, setPhone] = useState(parsedPhone.number);
+  const [country, setCountry] = useState(member.resident_country ?? "");
+  const [role, setRole] = useState<ProfileRole>(member.role);
+  const [memberCode, setMemberCode] = useState(member.membership?.member_code ?? "");
+  const [joinedAt, setJoinedAt] = useState(member.membership?.joined_at ?? new Date().toISOString().slice(0, 10));
+  const [status, setStatus] = useState<MembershipStatus>(member.membership?.status ?? "active");
+  const [busy, setBusy] = useState(false);
+
+  useEffect(() => {
+    const nextPhone = splitPhoneNumber(member.phone);
+    // eslint-disable-next-line react-hooks/set-state-in-effect
+    setFullName(member.full_name);
+    setPhoneCode(nextPhone.code);
+    setPhone(nextPhone.number);
+    setCountry(member.resident_country ?? "");
+    setRole(member.role);
+    setMemberCode(member.membership?.member_code ?? "");
+    setJoinedAt(member.membership?.joined_at ?? new Date().toISOString().slice(0, 10));
+    setStatus(member.membership?.status ?? "active");
+  }, [member]);
+
+  async function save(event: React.FormEvent<HTMLFormElement>) {
+    event.preventDefault();
+    setBusy(true);
+    try {
+      await updateMemberRecord({
+        projectId,
+        userId: member.id,
+        fullName,
+        phone: joinPhoneNumber(phoneCode, phone),
+        residentCountry: country || null,
+        role,
+        memberCode: memberCode.trim() || null,
+        joinedAt,
+        status,
+      });
+      await onSaved();
+    } catch (err) {
+      onError(getErrorMessage(err, "Could not save member."));
+    } finally {
+      setBusy(false);
+    }
+  }
+
+  return (
+    <form className="member-card" onSubmit={(event) => void save(event)}>
+      <div className="member-card-head">
+        <div>
+          <h3>{member.full_name || member.email || "Unnamed member"}</h3>
+          <p>{member.email ?? "No email"}{isCurrentUser ? " / current admin" : ""}</p>
+        </div>
+        <StatusPill status={status === "active" ? "approved" : status === "paused" ? "pending" : "rejected"} />
+      </div>
+      <div className="member-card-grid">
+        <label>
+          Full name
+          <input value={fullName} onChange={(event) => setFullName(event.target.value)} required />
+        </label>
+        <label>
+          Phone
+          <div className="phone-input">
+            <select value={phoneCode} onChange={(event) => setPhoneCode(event.target.value)} aria-label="Phone country code">
+              {phoneCountryCodes.map((item) => (
+                <option key={item.code} value={item.code}>
+                  {item.code} {item.label}
+                </option>
+              ))}
+            </select>
+            <input inputMode="numeric" value={phone} onChange={(event) => setPhone(event.target.value)} />
+          </div>
+        </label>
+        <label>
+          Country
+          <input value={country} onChange={(event) => setCountry(event.target.value)} />
+        </label>
+        <label>
+          Role
+          <select value={role} onChange={(event) => setRole(event.target.value as ProfileRole)} disabled={isCurrentUser}>
+            <option value="member">Member</option>
+            <option value="viewer">Viewer</option>
+            <option value="admin">Admin</option>
+          </select>
+        </label>
+        <label>
+          Member code
+          <input value={memberCode} onChange={(event) => setMemberCode(event.target.value)} placeholder="M-001" />
+        </label>
+        <label>
+          Joined date
+          <input type="date" value={joinedAt} onChange={(event) => setJoinedAt(event.target.value)} />
+        </label>
+        <label>
+          Status
+          <select value={status} onChange={(event) => setStatus(event.target.value as MembershipStatus)}>
+            <option value="active">Active</option>
+            <option value="paused">Paused</option>
+            <option value="left">Left</option>
+          </select>
+        </label>
+      </div>
+      <button className="secondary-button" type="submit" disabled={busy}>
+        {busy ? "Saving" : "Save member"}
+      </button>
+    </form>
+  );
+}
+
 function ProjectSetupPanel({ project, onSaved, onError }: {
   project: InvestmentProject;
   onSaved: () => Promise<void>;
@@ -590,6 +798,7 @@ function ProjectSetupPanel({ project, onSaved, onError }: {
   const [busy, setBusy] = useState(false);
 
   useEffect(() => {
+    // eslint-disable-next-line react-hooks/set-state-in-effect
     setName(project.name);
     setDescription(project.description ?? "");
     setTargetAmount(String(Number(project.target_amount_bdt ?? 0)));
