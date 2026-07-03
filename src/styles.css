@@ -17,8 +17,8 @@ body {
   min-width: 320px;
   min-height: 100vh;
   background:
-    linear-gradient(180deg, rgba(224, 236, 230, 0.72) 0, rgba(244, 247, 246, 0) 300px),
-    #f4f7f6;
+    linear-gradient(120deg, rgba(184, 210, 248, 0.5) 0, rgba(210, 234, 223, 0.82) 48%, rgba(244, 247, 246, 0) 100%),
+    #eef5f3;
 }
 
 button,
@@ -39,16 +39,14 @@ button {
 }
 
 .page-shell.admin-shell {
-  width: 100%;
-  margin: 0;
-  padding: 28px 32px 48px 336px;
+  width: min(1440px, calc(100% - 48px));
+  margin: 0 auto;
+  padding: 32px 0 48px;
 }
 
 .page-shell.admin-shell .app-header,
 .page-shell.admin-shell .admin-layout {
-  width: min(100%, 1560px);
-  margin-left: auto;
-  margin-right: auto;
+  width: 100%;
 }
 
 .page-shell.compact {
@@ -63,6 +61,15 @@ button {
   gap: 20px;
   align-items: flex-start;
   margin-bottom: 22px;
+}
+
+.page-shell.admin-shell .app-header {
+  align-items: center;
+  border: 1px solid rgba(255, 255, 255, 0.78);
+  border-radius: 8px;
+  background: rgba(241, 247, 246, 0.78);
+  box-shadow: 0 18px 46px rgba(55, 79, 95, 0.12);
+  padding: 18px;
 }
 
 .app-header h1,
@@ -431,7 +438,8 @@ button:disabled {
 }
 
 .admin-layout {
-  display: block;
+  display: grid;
+  gap: 18px;
 }
 
 .admin-menu-button,
@@ -440,29 +448,31 @@ button:disabled {
 }
 
 .admin-sidebar {
-  position: fixed;
-  inset: 0 auto 0 0;
-  width: 304px;
-  height: 100vh;
-  border: 1px solid #dce4df;
-  border-top: 0;
-  border-bottom: 0;
-  border-left: 0;
-  border-radius: 0;
-  background: #ffffff;
-  box-shadow: 0 12px 30px rgba(29, 39, 35, 0.055);
-  padding: 28px 18px;
-  overflow-y: auto;
+  position: sticky;
+  top: 14px;
+  width: 100%;
+  min-height: 76px;
+  border: 1px solid rgba(255, 255, 255, 0.74);
+  border-radius: 8px;
+  background: rgba(246, 251, 250, 0.82);
+  box-shadow: 0 18px 46px rgba(55, 79, 95, 0.12);
+  padding: 14px;
+  overflow-x: auto;
   z-index: 20;
+  display: flex;
+  align-items: center;
+  gap: 16px;
 }
 
 .admin-sidebar-head {
   display: flex;
   gap: 10px;
   align-items: center;
-  padding-bottom: 14px;
-  border-bottom: 1px solid #edf1ef;
-  margin-bottom: 12px;
+  padding: 0 16px 0 2px;
+  border-bottom: 0;
+  border-right: 1px solid #dce6e2;
+  margin-bottom: 0;
+  flex: 0 0 auto;
 }
 
 .admin-sidebar-head h2,
@@ -483,12 +493,14 @@ button:disabled {
 }
 
 .admin-nav {
-  display: grid;
-  gap: 6px;
+  display: flex;
+  gap: 8px;
+  min-width: max-content;
 }
 
 .admin-nav button {
-  width: 100%;
+  width: auto;
+  min-width: 148px;
   border: 0;
   border-radius: 8px;
   background: transparent;
@@ -573,6 +585,408 @@ button:disabled {
   display: grid;
   grid-template-columns: repeat(2, minmax(0, 1fr));
   gap: 16px;
+}
+
+.finance-dashboard-grid {
+  display: grid;
+  grid-template-columns: minmax(320px, 1.28fr) minmax(260px, 0.78fr) minmax(320px, 1fr);
+  grid-auto-rows: minmax(178px, auto);
+  gap: 18px;
+}
+
+.finance-dashboard-grid .panel {
+  border-color: rgba(255, 255, 255, 0.74);
+  box-shadow: 0 18px 46px rgba(55, 79, 95, 0.12);
+}
+
+.finance-balance-card {
+  grid-row: span 2;
+  background: linear-gradient(145deg, #eef5ff 0%, #f8fbff 100%);
+  display: grid;
+  align-content: space-between;
+  gap: 18px;
+}
+
+.finance-transactions-card {
+  grid-column: span 2;
+  grid-row: span 2;
+  background: #d8ece7;
+}
+
+.finance-member-card {
+  background: #d9efe8;
+}
+
+.finance-progress-card {
+  grid-column: span 2;
+  background: #f4f8ff;
+}
+
+.finance-score-card {
+  background: #f8fbff;
+}
+
+.finance-card-head {
+  display: flex;
+  justify-content: space-between;
+  gap: 16px;
+  align-items: flex-start;
+}
+
+.finance-card-head h2 {
+  margin: 0;
+  color: #16151d;
+  font-size: clamp(2.35rem, 5vw, 4.6rem);
+  line-height: 0.95;
+  letter-spacing: 0;
+  overflow-wrap: anywhere;
+}
+
+.finance-card-head span:not(.title-icon) {
+  display: block;
+  margin-top: 8px;
+  color: #60716a;
+  font-weight: 800;
+}
+
+.mini-card-row {
+  display: grid;
+  grid-template-columns: repeat(2, minmax(0, 1fr));
+  gap: 12px;
+}
+
+.mini-stat {
+  border: 1px solid rgba(255, 255, 255, 0.82);
+  border-radius: 8px;
+  background: rgba(255, 255, 255, 0.58);
+  padding: 12px;
+}
+
+.mini-stat span,
+.mini-stat strong {
+  display: block;
+}
+
+.mini-stat span {
+  color: #66776f;
+  font-size: 0.78rem;
+  font-weight: 800;
+}
+
+.mini-stat strong {
+  margin-top: 6px;
+  color: #171b19;
+  font-size: 1.05rem;
+  overflow-wrap: anywhere;
+}
+
+.target-progress-layout {
+  display: grid;
+  grid-template-columns: minmax(180px, 260px) minmax(0, 1fr);
+  gap: 20px;
+  align-items: center;
+}
+
+.target-progress-ring {
+  width: min(240px, 100%);
+  aspect-ratio: 1;
+  border-radius: 999px;
+  display: grid;
+  place-items: center;
+  padding: 18px;
+  justify-self: center;
+}
+
+.target-progress-ring > div {
+  width: 100%;
+  height: 100%;
+  border-radius: 999px;
+  background: #f8fbff;
+  display: grid;
+  place-items: center;
+  align-content: center;
+  text-align: center;
+  box-shadow: inset 0 0 0 1px rgba(22, 53, 43, 0.08);
+}
+
+.target-progress-ring strong,
+.target-progress-ring span {
+  display: block;
+}
+
+.target-progress-ring strong {
+  color: #15151d;
+  font-size: clamp(2.2rem, 5vw, 3.8rem);
+  line-height: 1;
+}
+
+.target-progress-ring span {
+  margin-top: 7px;
+  color: #4f8b70;
+  font-weight: 800;
+}
+
+.target-progress-details {
+  display: grid;
+  grid-template-columns: repeat(3, minmax(0, 1fr));
+  gap: 12px;
+}
+
+.member-identity {
+  display: flex;
+  align-items: center;
+  gap: 12px;
+  border: 1px solid rgba(255, 255, 255, 0.82);
+  border-radius: 8px;
+  background: rgba(255, 255, 255, 0.6);
+  padding: 13px;
+  margin-bottom: 12px;
+}
+
+.member-avatar {
+  width: 50px;
+  height: 50px;
+  flex: 0 0 auto;
+  border-radius: 999px;
+  display: grid;
+  place-items: center;
+  background: #e5efe9;
+  color: #16352b;
+}
+
+.member-identity strong,
+.member-identity small {
+  display: block;
+  min-width: 0;
+  overflow-wrap: anywhere;
+}
+
+.member-identity strong {
+  color: #14211c;
+  font-size: 1rem;
+}
+
+.member-identity small {
+  margin-top: 4px;
+  color: #60716a;
+  font-weight: 800;
+}
+
+.collection-chart {
+  display: grid;
+  gap: 12px;
+}
+
+.collection-chart-head {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  gap: 12px;
+}
+
+.collection-chart-head span,
+.collection-chart-head strong {
+  display: block;
+}
+
+.collection-chart-head span {
+  color: #66776f;
+  font-size: 0.78rem;
+  font-weight: 800;
+}
+
+.collection-chart-head strong {
+  margin-top: 3px;
+  color: #171b19;
+  font-size: 0.92rem;
+}
+
+.chart-arrow-group {
+  display: inline-flex;
+  gap: 6px;
+  flex: 0 0 auto;
+}
+
+.chart-arrow {
+  width: 34px;
+  height: 34px;
+  border: 1px solid rgba(22, 53, 43, 0.12);
+  border-radius: 8px;
+  display: grid;
+  place-items: center;
+  background: rgba(255, 255, 255, 0.72);
+  color: #16352b;
+}
+
+.chart-arrow:disabled {
+  opacity: 0.38;
+}
+
+.monthly-bars {
+  min-height: 178px;
+  display: grid;
+  grid-template-columns: repeat(6, minmax(34px, 1fr));
+  gap: 10px;
+  align-items: end;
+  padding-top: 8px;
+}
+
+.monthly-bar-item {
+  min-width: 0;
+  display: grid;
+  gap: 8px;
+  justify-items: center;
+}
+
+.monthly-bar-track {
+  position: relative;
+  width: min(100%, 34px);
+  height: 128px;
+  border-radius: 999px;
+  background: rgba(255, 255, 255, 0.6);
+  overflow: hidden;
+}
+
+.monthly-bar-track span {
+  position: absolute;
+  inset: auto 0 0;
+  display: block;
+  border-radius: 999px 999px 0 0;
+}
+
+.monthly-bar-approved {
+  background: #8fb4f2;
+}
+
+.monthly-bar-pending {
+  background: rgba(239, 194, 83, 0.78);
+}
+
+.monthly-bar-item small {
+  color: #52645c;
+  font-size: 0.72rem;
+  font-weight: 800;
+  text-align: center;
+}
+
+.monthly-bar-item b {
+  color: #17201c;
+  font-size: 0.72rem;
+  line-height: 1.2;
+  text-align: center;
+  overflow-wrap: anywhere;
+}
+
+.contribution-feed {
+  display: grid;
+  gap: 12px;
+}
+
+.contribution-feed-item {
+  display: grid;
+  grid-template-columns: 42px minmax(0, 1fr) auto;
+  gap: 10px;
+  align-items: center;
+  border-bottom: 1px solid rgba(97, 122, 112, 0.18);
+  padding-bottom: 12px;
+}
+
+.contribution-feed-item:last-child {
+  border-bottom: 0;
+  padding-bottom: 0;
+}
+
+.contribution-feed-item strong,
+.contribution-feed-item small {
+  display: block;
+  min-width: 0;
+  overflow-wrap: anywhere;
+}
+
+.contribution-feed-item strong {
+  color: #14211c;
+}
+
+.contribution-feed-item small {
+  margin-top: 3px;
+  color: #62736b;
+  font-weight: 700;
+}
+
+.contribution-feed-item b {
+  color: #121916;
+  text-align: right;
+  white-space: nowrap;
+}
+
+.feed-icon {
+  width: 42px;
+  height: 42px;
+  display: grid;
+  place-items: center;
+  border-radius: 999px;
+  color: #16352b;
+  border: 1px solid rgba(22, 53, 43, 0.2);
+}
+
+.feed-icon.approved {
+  background: #dff4e9;
+}
+
+.feed-icon.pending {
+  background: #fff0c8;
+}
+
+.feed-icon.rejected {
+  background: #ffe0e0;
+}
+
+.progress-gauge-wrap {
+  display: grid;
+  place-items: center;
+  min-height: 174px;
+}
+
+.progress-gauge {
+  width: min(190px, 72vw);
+  aspect-ratio: 1;
+  border-radius: 999px;
+  display: grid;
+  place-items: center;
+  padding: 16px;
+}
+
+.progress-gauge > div {
+  width: 100%;
+  height: 100%;
+  border-radius: 999px;
+  background: #f8fbff;
+  display: grid;
+  place-items: center;
+  align-content: center;
+  text-align: center;
+  box-shadow: inset 0 0 0 1px rgba(22, 53, 43, 0.08);
+}
+
+.progress-gauge strong,
+.progress-gauge span {
+  display: block;
+}
+
+.progress-gauge strong {
+  color: #15151d;
+  font-size: clamp(2rem, 4vw, 3rem);
+  line-height: 1;
+}
+
+.progress-gauge span {
+  margin-top: 6px;
+  color: #4f8b70;
+  font-weight: 800;
+}
+
+.compact-insights {
+  gap: 8px;
 }
 
 .insight-list {
@@ -674,6 +1088,35 @@ table {
   min-width: 720px;
 }
 
+.fit-table {
+  table-layout: fixed;
+  min-width: 0;
+}
+
+.recent-contributions-table {
+  overflow-x: visible;
+}
+
+.recent-contributions-table th:nth-child(1),
+.recent-contributions-table td:nth-child(1) {
+  width: 18%;
+}
+
+.recent-contributions-table th:nth-child(2),
+.recent-contributions-table td:nth-child(2) {
+  width: 28%;
+}
+
+.recent-contributions-table th:nth-child(3),
+.recent-contributions-table td:nth-child(3) {
+  width: 18%;
+}
+
+.recent-contributions-table th:nth-child(4),
+.recent-contributions-table td:nth-child(4) {
+  width: 36%;
+}
+
 th,
 td {
   text-align: left;
@@ -698,6 +1141,8 @@ th {
   text-align: left;
   text-decoration: underline;
   text-underline-offset: 3px;
+  overflow-wrap: anywhere;
+  white-space: normal;
 }
 
 .receipt-link:hover {
@@ -947,20 +1392,57 @@ th {
   }
 
   .admin-sidebar {
+    position: fixed;
     inset: 0 auto 0 0;
     width: min(326px, calc(100vw - 36px));
+    height: 100vh;
     transform: translateX(-105%);
     transition: transform 180ms ease;
     border-right: 1px solid #dce4df;
     z-index: 33;
+    display: block;
+    overflow-y: auto;
+    overflow-x: hidden;
+    background: #ffffff;
+    padding: 28px 18px;
+    border-radius: 0;
   }
 
   .admin-sidebar.open {
     transform: translateX(0);
   }
 
+  .admin-sidebar-head {
+    padding: 0 0 14px;
+    border-right: 0;
+    border-bottom: 1px solid #edf1ef;
+    margin-bottom: 12px;
+  }
+
+  .admin-nav {
+    display: grid;
+    min-width: 0;
+    gap: 6px;
+  }
+
+  .admin-nav button {
+    width: 100%;
+    min-width: 0;
+  }
+
   .admin-metric-grid {
     grid-template-columns: repeat(2, minmax(0, 1fr));
+  }
+
+  .finance-dashboard-grid {
+    grid-template-columns: minmax(0, 1fr) minmax(320px, 0.8fr);
+  }
+
+  .finance-balance-card,
+  .finance-transactions-card,
+  .finance-progress-card {
+    grid-column: span 1;
+    grid-row: span 1;
   }
 }
 
@@ -1024,7 +1506,8 @@ th {
   }
 
   .admin-metric-grid,
-  .overview-grid {
+  .overview-grid,
+  .finance-dashboard-grid {
     grid-template-columns: repeat(2, minmax(0, 1fr));
   }
 
@@ -1085,8 +1568,51 @@ th {
   }
 
   .admin-metric-grid,
-  .overview-grid {
+  .overview-grid,
+  .finance-dashboard-grid {
     grid-template-columns: 1fr;
+  }
+
+  .finance-balance-card,
+  .finance-transactions-card,
+  .finance-progress-card {
+    grid-column: span 1;
+    grid-row: span 1;
+  }
+
+  .finance-card-head h2 {
+    font-size: clamp(2rem, 12vw, 3rem);
+  }
+
+  .mini-card-row {
+    grid-template-columns: 1fr;
+  }
+
+  .target-progress-layout,
+  .target-progress-details {
+    grid-template-columns: 1fr;
+  }
+
+  .target-progress-ring {
+    width: min(220px, 82vw);
+  }
+
+  .monthly-bars {
+    gap: 8px;
+    grid-template-columns: repeat(6, minmax(24px, 1fr));
+  }
+
+  .monthly-bar-track {
+    width: min(100%, 28px);
+  }
+
+  .contribution-feed-item {
+    grid-template-columns: 38px minmax(0, 1fr);
+  }
+
+  .contribution-feed-item b {
+    grid-column: 2;
+    text-align: left;
   }
 
   .metric-card {

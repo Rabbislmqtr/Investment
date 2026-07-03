@@ -3,9 +3,10 @@ import type React from "react";
 import type { Session } from "@supabase/supabase-js";
 import {
   AlertCircle,
-  ArrowDownUp,
   Banknote,
   CheckCircle2,
+  ChevronLeft,
+  ChevronRight,
   Clock3,
   Download,
   FileText,
@@ -30,6 +31,7 @@ import {
   getCurrentProfile,
   getMemberContributions,
   getMemberPaymentStatus,
+  getProjectApprovedContributions,
   getSignedReceiptUrl,
   reviewContribution,
   submitContribution,
@@ -118,6 +120,7 @@ function InvestmentApp({ session }: { session: Session }) {
   const [profile, setProfile] = useState<Profile | null>(null);
   const [project, setProject] = useState<InvestmentProject | null>(null);
   const [contributions, setContributions] = useState<Contribution[]>([]);
+  const [projectCollections, setProjectCollections] = useState<Contribution[]>([]);
   const [mode, setMode] = useState<ViewMode>("member");
   const [loading, setLoading] = useState(true);
   const [message, setMessage] = useState<string | null>(null);
@@ -140,11 +143,23 @@ function InvestmentApp({ session }: { session: Session }) {
       const effectiveMode = profileData?.role === "admin" ? "admin" : nextMode ?? "member";
       setMode(effectiveMode);
 
-      const contributionData = effectiveMode === "admin"
-        ? await getAdminContributions()
-        : await getMemberContributions(session.user.id);
+      let contributionData: Contribution[] = [];
+      let collectionData: Contribution[] = [];
+
+      if (effectiveMode === "admin") {
+        contributionData = await getAdminContributions();
+        collectionData = contributionData.filter((contribution) => contribution.status === "approved" && !isContributionFromAdmin(contribution));
+      } else {
+        const [memberContributionData, projectCollectionData] = await Promise.all([
+          getMemberContributions(session.user.id),
+          projectData ? getProjectApprovedContributions(projectData.id) : Promise.resolve([]),
+        ]);
+        contributionData = memberContributionData;
+        collectionData = projectCollectionData;
+      }
 
       setContributions(contributionData);
+      setProjectCollections(collectionData);
     } catch (err) {
       setError(getErrorMessage(err, "Could not load investment data."));
     } finally {
@@ -187,6 +202,7 @@ function InvestmentApp({ session }: { session: Session }) {
         <AdminDashboard
           project={project}
           contributions={contributions}
+          projectCollections={projectCollections}
           reviewerId={session.user.id}
           currentUserId={session.user.id}
           onProjectSaved={async () => {
@@ -205,6 +221,7 @@ function InvestmentApp({ session }: { session: Session }) {
           profile={profile}
           project={project}
           contributions={contributions}
+          projectCollections={projectCollections}
           onSavedProfile={async () => {
             setMessage("Profile saved.");
             await loadData("member");
@@ -292,6 +309,7 @@ function MemberDashboard(props: {
   profile: Profile | null;
   project: InvestmentProject | null;
   contributions: Contribution[];
+  projectCollections: Contribution[];
   onSavedProfile: () => Promise<void>;
   onSubmitted: () => Promise<void>;
   onError: (message: string) => void;
@@ -348,8 +366,10 @@ function MemberDashboard(props: {
       <main className="admin-content">
         {activeSection === "overview" && (
           <MemberOverview
+            profile={props.profile}
             project={props.project}
             contributions={props.contributions}
+            projectCollections={props.projectCollections}
             totals={totals}
             onNavigate={selectSection}
           />
@@ -390,109 +410,84 @@ function memberNavItemsConfig(pendingCount: number, approvedCount: number): Arra
   ];
 }
 
-function MemberOverview({ project, contributions, totals, onNavigate }: {
+function MemberOverview({ profile, project, contributions, projectCollections, totals, onNavigate }: {
+  profile: Profile | null;
   project: InvestmentProject | null;
   contributions: Contribution[];
+  projectCollections: Contribution[];
   totals: ReturnType<typeof calculateTotals>;
   onNavigate: (section: MemberSection) => void;
 }) {
+  const projectTotals = useMemo(() => calculateTotals(projectCollections), [projectCollections]);
   const target = Number(project?.target_amount_bdt ?? 0);
-  const progress = target > 0 ? Math.min(100, (totals.approved / target) * 100) : 0;
+  const progress = target > 0 ? Math.min(100, (projectTotals.approved / target) * 100) : 0;
   const recent = contributions.slice(0, 5);
+  const paidThisMonth = contributions.some((contribution) => contribution.status === "approved" && monthKey(contribution.payment_date) === currentMonthKey());
 
   return (
-    <div className="admin-page-stack">
-      <section className="panel">
-        <div className="panel-title split-title">
+    <div className="finance-dashboard-grid">
+      <section className="panel finance-balance-card">
+        <div className="finance-card-head">
           <div>
-            <span className="title-icon"><LayoutDashboard size={20} /></span>
-            <h2>Member overview</h2>
+            <p className="eyebrow">Total collected</p>
+            <h2>{formatBdt(projectTotals.approved)}</h2>
+            <span>{project?.name ?? "No active project"}</span>
           </div>
-          <span className="count-badge">{project?.name ?? "No active project"}</span>
+          <span className="title-icon"><Banknote size={20} /></span>
         </div>
-        <div className="admin-metric-grid">
-          <MetricCard icon={<Banknote />} label="My approved fund" value={formatBdt(totals.approved)} />
-          <MetricCard icon={<Clock3 />} label="Waiting review" value={formatBdt(totals.pending)} />
-          <MetricCard icon={<ArrowDownUp />} label="My entries" value={String(totals.totalCount)} />
-          <MetricCard icon={<LayoutDashboard />} label="Target progress" value={target > 0 ? `${Math.round(progress)}%` : "No target"} />
+        <CollectionChart contributions={projectCollections} />
+        <div className="mini-card-row">
+          <MiniStat label="My approved" value={formatBdt(totals.approved)} />
+          <MiniStat label="Waiting review" value={formatBdt(totals.pending)} />
         </div>
-        {target > 0 && (
-          <div className="progress-wrap compact-progress" aria-label="Investment target progress">
-            <div className="progress-labels">
-              <span>{formatBdt(totals.approved)}</span>
-              <span>{formatBdt(target)}</span>
-            </div>
-            <div className="progress-bar"><span style={{ width: `${progress}%` }} /></div>
-          </div>
-        )}
       </section>
 
-      <div className="overview-grid">
-        <section className="panel">
-          <div className="panel-title split-title">
-            <div>
-              <span className="title-icon"><Upload size={20} /></span>
-              <h2>Submit contribution</h2>
-            </div>
-            <button className="secondary-button" type="button" onClick={() => onNavigate("submit")}>Open form</button>
-          </div>
-          <div className="insight-list">
-            <InsightRow label="Pending review" value={formatBdt(totals.pending)} />
-            <InsightRow label="Rejected records" value={String(totals.rejected)} />
-            <InsightRow label="Total records" value={String(totals.totalCount)} />
-          </div>
-        </section>
-
-        <section className="panel">
-          <div className="panel-title split-title">
-            <div>
-              <span className="title-icon"><Users size={20} /></span>
-              <h2>Member payments</h2>
-            </div>
-            <button className="secondary-button" type="button" onClick={() => onNavigate("status")}>View status</button>
-          </div>
-          <div className="insight-list">
-            <InsightRow label="Approved amount" value={formatBdt(totals.approved)} />
-            <InsightRow label="Approved entries" value={String(contributions.filter((contribution) => contribution.status === "approved").length)} />
-            <InsightRow label="Shared view" value="Paid / not paid" />
-          </div>
-        </section>
-      </div>
-
-      <section className="panel">
+      <section className="panel finance-transactions-card">
         <div className="panel-title split-title">
           <div>
             <span className="title-icon"><ReceiptText size={20} /></span>
-            <h2>Recent contribution history</h2>
+            <h2>Recent payments</h2>
           </div>
-          <button className="secondary-button" type="button" onClick={() => onNavigate("history")}>Open history</button>
+          <button className="secondary-button" type="button" onClick={() => onNavigate("history")}>See all</button>
         </div>
-        {recent.length === 0 ? (
-          <EmptyState text="No contribution records yet." />
-        ) : (
-          <div className="table-wrap">
-            <table>
-              <thead>
-                <tr>
-                  <th>Date</th>
-                  <th>BDT</th>
-                  <th>Source</th>
-                  <th>Status</th>
-                </tr>
-              </thead>
-              <tbody>
-                {recent.map((contribution) => (
-                  <tr key={contribution.id}>
-                    <td data-label="Date">{formatDate(contribution.payment_date)}</td>
-                    <td data-label="BDT">{formatBdt(Number(contribution.bdt_amount))}</td>
-                    <td data-label="Source">{contribution.source_currency ? `${contribution.source_currency} ${contribution.source_amount ?? ""}` : contribution.sent_from_country || "BDT"}</td>
-                    <td data-label="Status"><StatusPill status={contribution.status} /></td>
-                  </tr>
-                ))}
-              </tbody>
-            </table>
+        <ContributionFeed contributions={recent} />
+      </section>
+
+      <section className="panel finance-member-card">
+        <div className="panel-title split-title">
+          <div>
+            <span className="title-icon"><UserRound size={20} /></span>
+            <h2>My member profile</h2>
           </div>
-        )}
+          <button className="secondary-button" type="button" onClick={() => onNavigate("profile")}>Edit</button>
+        </div>
+        <div className="member-identity">
+          <span className="member-avatar"><UserRound size={24} /></span>
+          <div>
+            <strong>{profile?.full_name || profile?.email || "Member"}</strong>
+            <small>{profile?.email ?? "Email not set"}</small>
+          </div>
+        </div>
+        <div className="insight-list compact-insights">
+          <InsightRow label="Role" value={profile?.role ?? "member"} />
+          <InsightRow label="Phone" value={profile?.phone ?? "Not set"} />
+          <InsightRow label="Country" value={profile?.resident_country ?? "Not set"} />
+        </div>
+      </section>
+
+      <section className="panel finance-progress-card">
+        <TargetProgressCard collected={projectTotals.approved} target={target} />
+      </section>
+
+      <section className="panel finance-score-card">
+        <div className="panel-title split-title">
+          <div>
+            <span className="title-icon"><Users size={20} /></span>
+            <h2>Payment status</h2>
+          </div>
+          <button className="secondary-button" type="button" onClick={() => onNavigate("status")}>Open</button>
+        </div>
+        <ProgressGauge value={progress} label={paidThisMonth ? "Current" : "Needs payment"} />
       </section>
     </div>
   );
@@ -536,21 +531,6 @@ function MemberPaymentStatusPanel({ project, onError }: {
 
   const paidCount = rows.filter((row) => row.paid).length;
   const unpaidCount = rows.length - paidCount;
-  const approvedTotal = rows.reduce((sum, row) => sum + row.approvedTotalBdt, 0);
-
-  async function openStatusReceipt(row: MemberPaymentStatus) {
-    if (!row.receiptStoragePath) {
-      onError("No receipt is attached to this approved payment.");
-      return;
-    }
-
-    try {
-      const url = await getSignedReceiptUrl(row.receiptStoragePath);
-      window.open(url, "_blank", "noopener,noreferrer");
-    } catch (err) {
-      onError(getErrorMessage(err, "Could not open receipt."));
-    }
-  }
 
   return (
     <section className="panel">
@@ -561,7 +541,7 @@ function MemberPaymentStatusPanel({ project, onError }: {
         </div>
         <span className="count-badge">{monthLabel(month)}</span>
       </div>
-      <p className="helper-text">This list shows project members with approved payments in the selected month. Members without an approved payment are marked as not paid.</p>
+      <p className="helper-text">Select a month to see which project members have an approved payment.</p>
       <div className="filter-grid">
         <label>
           Month
@@ -571,7 +551,6 @@ function MemberPaymentStatusPanel({ project, onError }: {
       <div className="admin-metric-grid">
         <MetricCard icon={<CheckCircle2 />} label="Paid members" value={loading ? "Loading" : String(paidCount)} />
         <MetricCard icon={<Clock3 />} label="Not paid" value={loading ? "Loading" : String(unpaidCount)} />
-        <MetricCard icon={<Banknote />} label="Approved BDT" value={formatBdt(approvedTotal)} />
         <MetricCard icon={<Users />} label="Members shown" value={loading ? "Loading" : String(rows.length)} />
       </div>
 
@@ -586,11 +565,7 @@ function MemberPaymentStatusPanel({ project, onError }: {
               <tr>
                 <th>Member</th>
                 <th>Status</th>
-                <th>BDT</th>
-                <th>Payments</th>
                 <th>Last paid</th>
-                <th>Method</th>
-                <th>Receipt</th>
               </tr>
             </thead>
             <tbody>
@@ -605,19 +580,7 @@ function MemberPaymentStatusPanel({ project, onError }: {
                       {row.paid ? "Paid" : "Not paid"}
                     </span>
                   </td>
-                  <td data-label="BDT">{formatBdt(row.approvedTotalBdt)}</td>
-                  <td data-label="Payments">{row.paymentCount}</td>
                   <td data-label="Last paid">{row.lastPaymentDate ? formatDate(row.lastPaymentDate) : "None"}</td>
-                  <td data-label="Method">{row.lastPaymentMethod ?? "Not set"}</td>
-                  <td data-label="Receipt">
-                    {row.receiptStoragePath ? (
-                      <button className="receipt-link" type="button" onClick={() => void openStatusReceipt(row)}>
-                        {row.receiptFileName ?? "Open receipt"}
-                      </button>
-                    ) : (
-                      "None"
-                    )}
-                  </td>
                 </tr>
               ))}
             </tbody>
@@ -823,9 +786,10 @@ function PaymentForm({ userId, project, onSubmitted, onError }: {
   );
 }
 
-function AdminDashboard({ project, contributions, reviewerId, currentUserId, onProjectSaved, onReviewed, onError }: {
+function AdminDashboard({ project, contributions, projectCollections, reviewerId, currentUserId, onProjectSaved, onReviewed, onError }: {
   project: InvestmentProject | null;
   contributions: Contribution[];
+  projectCollections: Contribution[];
   reviewerId: string;
   currentUserId: string;
   onProjectSaved: () => Promise<void>;
@@ -937,6 +901,7 @@ function AdminDashboard({ project, contributions, reviewerId, currentUserId, onP
           <AdminOverview
             project={project}
             contributions={contributions}
+            projectCollections={projectCollections}
             members={members}
             loadingMembers={loadingMembers}
             onNavigate={selectSection}
@@ -986,9 +951,10 @@ function navItemsConfig(pendingCount: number, memberCount: number): Array<{ id: 
   ];
 }
 
-function AdminOverview({ project, contributions, members, loadingMembers, onNavigate, onOpenReceipt }: {
+function AdminOverview({ project, contributions, projectCollections, members, loadingMembers, onNavigate, onOpenReceipt }: {
   project: InvestmentProject | null;
   contributions: Contribution[];
+  projectCollections: Contribution[];
   members: MemberRecord[];
   loadingMembers: boolean;
   onNavigate: (section: AdminSection) => void;
@@ -998,7 +964,7 @@ function AdminOverview({ project, contributions, members, loadingMembers, onNavi
   const approved = memberContributions.filter((contribution) => contribution.status === "approved");
   const pending = memberContributions.filter((contribution) => contribution.status === "pending");
   const rejected = memberContributions.filter((contribution) => contribution.status === "rejected");
-  const approvedTotal = approved.reduce((sum, contribution) => sum + Number(contribution.bdt_amount), 0);
+  const approvedTotal = projectCollections.reduce((sum, contribution) => sum + Number(contribution.bdt_amount), 0);
   const pendingTotal = pending.reduce((sum, contribution) => sum + Number(contribution.bdt_amount), 0);
   const receiptBackedApproved = approved.filter((contribution) => (contribution.payment_receipts?.length ?? 0) > 0).length;
   const memberAccounts = members.filter(isMemberAccount);
@@ -1007,85 +973,41 @@ function AdminOverview({ project, contributions, members, loadingMembers, onNavi
   const needsSetupMembers = memberAccounts.filter((member) => !member.membership).length;
   const adminUsers = members.filter((member) => member.role === "admin").length;
   const target = Number(project?.target_amount_bdt ?? 0);
-  const progress = target > 0 ? Math.min(100, (approvedTotal / target) * 100) : 0;
   const recentApproved = approved
     .slice()
     .sort((a, b) => b.payment_date.localeCompare(a.payment_date))
     .slice(0, 5);
 
   return (
-    <div className="admin-page-stack">
-      <section className="panel">
-        <div className="panel-title split-title">
+    <div className="finance-dashboard-grid">
+      <section className="panel finance-balance-card">
+        <div className="finance-card-head">
           <div>
-            <span className="title-icon"><LayoutDashboard size={20} /></span>
-            <h2>Dashboard overview</h2>
+            <p className="eyebrow">Total collected</p>
+            <h2>{formatBdt(approvedTotal)}</h2>
+            <span>{project?.name ?? "No active project"}</span>
           </div>
-          <span className="count-badge">{project?.name ?? "No active project"}</span>
+          <span className="title-icon"><ShieldCheck size={20} /></span>
         </div>
-        <div className="admin-metric-grid">
-          <MetricCard icon={<Banknote />} label="Approved member fund" value={formatBdt(approvedTotal)} />
-          <MetricCard icon={<Clock3 />} label="Pending review" value={`${pending.length} / ${formatBdt(pendingTotal)}`} />
-          <MetricCard icon={<Users />} label="Active members" value={loadingMembers ? "Loading" : String(activeMembers)} />
-          <MetricCard icon={<ReceiptText />} label="Receipt-backed approved" value={`${receiptBackedApproved}/${approved.length}`} />
+        <CollectionChart contributions={projectCollections} />
+        <div className="mini-card-row">
+          <MiniStat label="Pending" value={`${pending.length} / ${formatBdt(pendingTotal)}`} />
+          <MiniStat label="Active members" value={loadingMembers ? "Loading" : String(activeMembers)} />
         </div>
-        {target > 0 && (
-          <div className="progress-wrap compact-progress" aria-label="Investment target progress">
-            <div className="progress-labels">
-              <span>{Math.round(progress)}% funded</span>
-              <span>{formatBdt(target)}</span>
-            </div>
-            <div className="progress-bar"><span style={{ width: `${progress}%` }} /></div>
-          </div>
-        )}
       </section>
 
-      <div className="overview-grid">
-        <section className="panel">
-          <div className="panel-title split-title">
-            <div>
-              <span className="title-icon"><ShieldCheck size={20} /></span>
-              <h2>Action queue</h2>
-            </div>
-            <button className="secondary-button" type="button" onClick={() => onNavigate("review")}>Open review</button>
-          </div>
-          <div className="insight-list">
-            <InsightRow label="Payments waiting approval" value={String(pending.length)} />
-            <InsightRow label="Rejected records" value={String(rejected.length)} />
-            <InsightRow label="Receipt coverage" value={approved.length ? `${Math.round((receiptBackedApproved / approved.length) * 100)}%` : "No approved records"} />
-          </div>
-        </section>
-
-        <section className="panel">
-          <div className="panel-title split-title">
-            <div>
-              <span className="title-icon"><Users size={20} /></span>
-              <h2>Membership</h2>
-            </div>
-            <button className="secondary-button" type="button" onClick={() => onNavigate("members")}>Manage members</button>
-          </div>
-          <div className="insight-list">
-            <InsightRow label="Active members" value={loadingMembers ? "Loading" : String(activeMembers)} />
-            <InsightRow label="Paused members" value={loadingMembers ? "Loading" : String(pausedMembers)} />
-            <InsightRow label="Needs setup" value={loadingMembers ? "Loading" : String(needsSetupMembers)} />
-            <InsightRow label="Admin users" value={loadingMembers ? "Loading" : String(adminUsers)} />
-          </div>
-        </section>
-      </div>
-
-      <section className="panel">
-        <div className="panel-title split-title">
+      <section className="panel finance-transactions-card">
+        <div className="panel-title">
           <div>
             <span className="title-icon"><ReceiptText size={20} /></span>
             <h2>Recent approved contributions</h2>
           </div>
-          <button className="secondary-button" type="button" onClick={() => onNavigate("reports")}>Open reports</button>
         </div>
         {recentApproved.length === 0 ? (
           <EmptyState text="No approved member contributions yet." />
         ) : (
-          <div className="table-wrap">
-            <table>
+          <div className="table-wrap recent-contributions-table">
+            <table className="fit-table">
               <thead>
                 <tr>
                   <th>Date</th>
@@ -1107,6 +1029,28 @@ function AdminOverview({ project, contributions, members, loadingMembers, onNavi
             </table>
           </div>
         )}
+      </section>
+
+      <section className="panel finance-progress-card">
+        <TargetProgressCard collected={approvedTotal} target={target} />
+      </section>
+
+      <section className="panel finance-score-card">
+        <div className="panel-title split-title">
+          <div>
+            <span className="title-icon"><Users size={20} /></span>
+            <h2>Membership health</h2>
+          </div>
+          <button className="secondary-button" type="button" onClick={() => onNavigate("members")}>Manage</button>
+        </div>
+        <ProgressGauge value={memberAccounts.length ? (activeMembers / memberAccounts.length) * 100 : 0} label={`${activeMembers} active`} />
+        <div className="insight-list compact-insights">
+          <InsightRow label="Paused" value={loadingMembers ? "Loading" : String(pausedMembers)} />
+          <InsightRow label="Needs setup" value={loadingMembers ? "Loading" : String(needsSetupMembers)} />
+          <InsightRow label="Admins" value={loadingMembers ? "Loading" : String(adminUsers)} />
+          <InsightRow label="Receipt coverage" value={approved.length ? `${Math.round((receiptBackedApproved / approved.length) * 100)}%` : "No records"} />
+          <InsightRow label="Rejected records" value={String(rejected.length)} />
+        </div>
       </section>
     </div>
   );
@@ -1150,6 +1094,184 @@ function InsightRow({ label, value }: { label: string; value: string }) {
       <strong>{value}</strong>
     </div>
   );
+}
+
+type CollectionMonthItem = {
+  key: string;
+  label: string;
+  total: number;
+  height: number;
+};
+
+function MiniStat({ label, value }: { label: string; value: string }) {
+  return (
+    <div className="mini-stat">
+      <span>{label}</span>
+      <strong>{value}</strong>
+    </div>
+  );
+}
+
+function TargetProgressCard({ collected, target }: { collected: number; target: number }) {
+  const progress = target > 0 ? Math.min(100, (collected / target) * 100) : 0;
+  const remaining = Math.max(0, target - collected);
+
+  return (
+    <>
+      <div className="panel-title split-title">
+        <div>
+          <span className="title-icon"><LayoutDashboard size={20} /></span>
+          <h2>Target progress</h2>
+        </div>
+        <span className="count-badge">{target > 0 ? `${Math.round(progress)}% funded` : "No target"}</span>
+      </div>
+      {target > 0 ? (
+        <div className="target-progress-layout" aria-label="Investment target progress">
+          <div
+            className="target-progress-ring"
+            style={{ background: `conic-gradient(#2f8060 0 ${progress}%, #e2ece7 ${progress}% 100%)` }}
+          >
+            <div>
+              <strong>{Math.round(progress)}%</strong>
+              <span>Funded</span>
+            </div>
+          </div>
+          <div className="target-progress-details">
+            <MiniStat label="Collected" value={formatBdt(collected)} />
+            <MiniStat label="Target" value={formatBdt(target)} />
+            <MiniStat label="Remaining" value={formatBdt(remaining)} />
+          </div>
+        </div>
+      ) : (
+        <EmptyState text="Set a project target to track progress." />
+      )}
+    </>
+  );
+}
+
+function CollectionChart({ contributions }: { contributions: Contribution[] }) {
+  const [monthOffset, setMonthOffset] = useState(0);
+  const months = useMemo(() => getCollectionWindow(contributions, monthOffset), [contributions, monthOffset]);
+  const periodLabel = `${months[0]?.label ?? ""} - ${months[months.length - 1]?.label ?? ""}`;
+
+  return (
+    <div className="collection-chart">
+      <div className="collection-chart-head">
+        <div>
+          <span>Monthly collection</span>
+          <strong>{periodLabel}</strong>
+        </div>
+        <div className="chart-arrow-group">
+          <button className="chart-arrow" type="button" onClick={() => setMonthOffset((current) => current - 6)} aria-label="Show previous 6 months">
+            <ChevronLeft size={16} />
+          </button>
+          <button
+            className="chart-arrow"
+            type="button"
+            onClick={() => setMonthOffset((current) => Math.min(0, current + 6))}
+            disabled={monthOffset === 0}
+            aria-label="Show next 6 months"
+          >
+            <ChevronRight size={16} />
+          </button>
+        </div>
+      </div>
+      <div className="monthly-bars" aria-label="Monthly collected money">
+        {months.map((item) => (
+          <div className="monthly-bar-item" key={item.key}>
+            <div className="monthly-bar-track">
+              <span className="monthly-bar-approved" style={{ height: `${item.height}%` }} />
+            </div>
+            <small>{item.label}</small>
+            <b>{formatBdt(item.total)}</b>
+          </div>
+        ))}
+      </div>
+    </div>
+  );
+}
+
+function ContributionFeed({ contributions }: { contributions: Contribution[] }) {
+  if (contributions.length === 0) return <EmptyState text="No contribution records yet." />;
+
+  return (
+    <div className="contribution-feed">
+      {contributions.map((contribution) => {
+        const hasMemberName = Boolean(contribution.member || contribution.profiles);
+        const title = hasMemberName ? getContributionMemberName(contribution) : `${contribution.status[0].toUpperCase()}${contribution.status.slice(1)} payment`;
+        return (
+          <article className="contribution-feed-item" key={contribution.id}>
+            <span className={`feed-icon ${contribution.status}`}>
+              {contribution.status === "approved" ? <CheckCircle2 size={18} /> : contribution.status === "rejected" ? <XCircle size={18} /> : <Clock3 size={18} />}
+            </span>
+            <div>
+              <strong>{title}</strong>
+              <small>{formatDate(contribution.payment_date)} / {contribution.payment_method || contribution.sent_from_country || "Contribution"}</small>
+            </div>
+            <b>{formatBdt(Number(contribution.bdt_amount))}</b>
+          </article>
+        );
+      })}
+    </div>
+  );
+}
+
+function ProgressGauge({ value, label }: { value: number; label: string }) {
+  const progress = Math.max(0, Math.min(100, value));
+  return (
+    <div className="progress-gauge-wrap">
+      <div
+        className="progress-gauge"
+        style={{
+          background: `conic-gradient(#65c3a1 0 ${progress}%, #efc253 ${progress}% ${Math.min(100, progress + 18)}%, #f06464 ${Math.min(100, progress + 18)}% 100%)`,
+        }}
+      >
+        <div>
+          <strong>{Math.round(progress)}%</strong>
+          <span>{label}</span>
+        </div>
+      </div>
+    </div>
+  );
+}
+
+function addMonths(date: Date, months: number) {
+  return new Date(date.getFullYear(), date.getMonth() + months, 1);
+}
+
+function startOfCurrentMonth() {
+  const now = new Date();
+  return new Date(now.getFullYear(), now.getMonth(), 1);
+}
+
+function monthKeyFromDate(date: Date) {
+  return `${date.getFullYear()}-${String(date.getMonth() + 1).padStart(2, "0")}`;
+}
+
+function getCollectionWindow(contributions: Contribution[], offsetMonths: number): CollectionMonthItem[] {
+  const totalsByMonth = new Map<string, number>();
+
+  contributions.forEach((contribution) => {
+    const key = monthKey(contribution.payment_date);
+    const current = totalsByMonth.get(key) ?? 0;
+    const amount = Number(contribution.bdt_amount);
+    if (contribution.status === "approved") totalsByMonth.set(key, current + amount);
+  });
+
+  const endMonth = addMonths(startOfCurrentMonth(), offsetMonths);
+  const monthDates = Array.from({ length: 6 }, (_unused, index) => addMonths(endMonth, index - 5));
+  const maxTotal = Math.max(...monthDates.map((date) => totalsByMonth.get(monthKeyFromDate(date)) ?? 0), 1);
+
+  return monthDates.map((date) => {
+    const key = monthKeyFromDate(date);
+    const total = totalsByMonth.get(key) ?? 0;
+    return {
+      key,
+      label: new Intl.DateTimeFormat("en", { month: "short", year: "2-digit" }).format(date),
+      total,
+      height: total > 0 ? Math.max(8, (total / maxTotal) * 100) : 0,
+    };
+  });
 }
 
 function monthKey(value: string) {

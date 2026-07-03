@@ -162,7 +162,25 @@ export async function getMemberContributions(memberId: string): Promise<Contribu
   return data ?? [];
 }
 
-export async function getMemberPaymentStatus(projectId: string, month: string): Promise<MemberPaymentStatus[]> {
+export async function getProjectApprovedContributions(projectId: string): Promise<Contribution[]> {
+  const { data, error } = await supabase
+    .from("contributions")
+    .select(
+      "id, project_id, member_id, payment_date, bdt_amount, source_currency, source_amount, exchange_rate, sent_from_country, payment_method, notes, status, reviewed_by, reviewed_at, rejection_reason, created_at",
+    )
+    .eq("project_id", projectId)
+    .eq("status", "approved")
+    .order("payment_date", { ascending: false });
+
+  if (error) throw error;
+  return (data ?? []) as Contribution[];
+}
+
+export async function getMemberPaymentStatus(
+  projectId: string,
+  month: string,
+  options: { includeFinancialDetails?: boolean } = {},
+): Promise<MemberPaymentStatus[]> {
   const monthStart = `${month}-01`;
   const nextMonth = new Date(`${monthStart}T00:00:00`);
   nextMonth.setMonth(nextMonth.getMonth() + 1);
@@ -180,28 +198,47 @@ export async function getMemberPaymentStatus(projectId: string, month: string): 
   const memberIds = (memberships ?? []).map((membership) => membership.user_id);
   if (memberIds.length === 0) return [];
 
-  const [{ data: profiles, error: profilesError }, { data: contributions, error: contributionsError }] = await Promise.all([
+  const contributionQuery = options.includeFinancialDetails
+    ? supabase
+        .from("contributions")
+        .select("id, member_id, payment_date, bdt_amount, payment_method, payment_receipts(file_name, storage_path)")
+        .eq("project_id", projectId)
+        .eq("status", "approved")
+        .gte("payment_date", monthStart)
+        .lt("payment_date", nextMonthStart)
+    : supabase
+        .from("contributions")
+        .select("id, member_id, payment_date")
+        .eq("project_id", projectId)
+        .eq("status", "approved")
+        .gte("payment_date", monthStart)
+        .lt("payment_date", nextMonthStart);
+
+  const [{ data: profiles, error: profilesError }, contributionResult] = await Promise.all([
     supabase
       .from("profiles")
       .select("id, full_name, email, phone, resident_country, role")
       .in("id", memberIds),
-    supabase
-      .from("contributions")
-      .select("id, member_id, payment_date, bdt_amount, payment_method, payment_receipts(file_name, storage_path)")
-      .eq("project_id", projectId)
-      .eq("status", "approved")
-      .gte("payment_date", monthStart)
-      .lt("payment_date", nextMonthStart),
+    contributionQuery,
   ]);
 
   if (profilesError) throw profilesError;
-  if (contributionsError) throw contributionsError;
+  if (contributionResult.error) throw contributionResult.error;
 
-  type StatusContribution = NonNullable<typeof contributions>[number];
+  type StatusContribution = {
+    id: string;
+    member_id: string;
+    payment_date: string;
+    bdt_amount?: number | null;
+    payment_method?: string | null;
+    payment_receipts?: Array<{ file_name: string | null; storage_path: string | null }> | null;
+  };
 
   const profileById = new Map((profiles ?? []).map((profile) => [profile.id, profile]));
   const contributionsByMember = new Map<string, StatusContribution[]>();
-  (contributions ?? []).forEach((contribution) => {
+  const statusContributions = (contributionResult.data ?? []) as unknown as StatusContribution[];
+
+  statusContributions.forEach((contribution) => {
     const entries = contributionsByMember.get(contribution.member_id) ?? [];
     entries.push(contribution);
     contributionsByMember.set(contribution.member_id, entries);
@@ -214,8 +251,11 @@ export async function getMemberPaymentStatus(projectId: string, month: string): 
       const sortedContributions = memberContributions
         .slice()
         .sort((a, b) => b.payment_date.localeCompare(a.payment_date));
-      const approvedTotalBdt = memberContributions.reduce((sum, contribution) => sum + Number(contribution.bdt_amount), 0);
+      const approvedTotalBdt = options.includeFinancialDetails
+        ? memberContributions.reduce((sum, contribution) => sum + Number(contribution.bdt_amount ?? 0), 0)
+        : 0;
       const lastContribution = sortedContributions[0];
+      const receipt = options.includeFinancialDetails ? lastContribution?.payment_receipts?.[0] : null;
 
       return {
         memberId: membership.user_id,
@@ -223,13 +263,13 @@ export async function getMemberPaymentStatus(projectId: string, month: string): 
         email: profile?.email ?? null,
         memberCode: membership.member_code,
         membershipStatus: membership.status,
-        paid: approvedTotalBdt > 0,
+        paid: memberContributions.length > 0,
         approvedTotalBdt,
         paymentCount: memberContributions.length,
         lastPaymentDate: lastContribution?.payment_date ?? null,
         lastPaymentMethod: lastContribution?.payment_method ?? null,
-        receiptFileName: lastContribution?.payment_receipts?.[0]?.file_name ?? null,
-        receiptStoragePath: lastContribution?.payment_receipts?.[0]?.storage_path ?? null,
+        receiptFileName: receipt?.file_name ?? null,
+        receiptStoragePath: receipt?.storage_path ?? null,
       };
     })
     .sort((a, b) => {
