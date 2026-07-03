@@ -1,4 +1,4 @@
-import { useEffect, useMemo, useState } from "react";
+import { useEffect, useId, useMemo, useState } from "react";
 import type React from "react";
 import type { Session } from "@supabase/supabase-js";
 import {
@@ -231,6 +231,7 @@ function InvestmentApp({ session }: { session: Session }) {
             await loadData("admin");
           }}
           onError={setError}
+          onSignOut={signOut}
         />
       ) : (
         <MemberDashboard
@@ -249,6 +250,7 @@ function InvestmentApp({ session }: { session: Session }) {
             await loadData("member");
           }}
           onError={setError}
+          onSignOut={signOut}
         />
       )}
     </PageShell>
@@ -401,6 +403,7 @@ function MemberDashboard(props: {
   onSavedProfile: () => Promise<void>;
   onSubmitted: () => Promise<void>;
   onError: (message: string) => void;
+  onSignOut: () => Promise<void>;
 }) {
   const [activeSection, setActiveSection] = useState<MemberSection>("overview");
   const [sidebarOpen, setSidebarOpen] = useState(false);
@@ -413,6 +416,11 @@ function MemberDashboard(props: {
   function selectSection(section: MemberSection) {
     setActiveSection(section);
     setSidebarOpen(false);
+  }
+
+  function handleSignOut() {
+    setSidebarOpen(false);
+    void props.onSignOut();
   }
 
   return (
@@ -448,6 +456,11 @@ function MemberDashboard(props: {
               <small>{item.detail}</small>
             </button>
           ))}
+          <button className="nav-logout" type="button" onClick={handleSignOut}>
+            <span><LogOut size={17} /></span>
+            <strong>Log out</strong>
+            <small>End session</small>
+          </button>
         </nav>
       </aside>
 
@@ -559,6 +572,55 @@ function ExpectedVsActualChart({ contributions, expectedMonthly }: {
   expectedMonthly: number;
 }) {
   const months = useMemo(() => getExpectedVsActualWindow(contributions, expectedMonthly), [contributions, expectedMonthly]);
+  const recentMonths = months.slice(-6);
+  const actualTotal = months.reduce((sum, item) => sum + item.actual, 0);
+  const expectedTotal = months.reduce((sum, item) => sum + item.expected, 0);
+  const gap = actualTotal - expectedTotal;
+  const latest = months[months.length - 1];
+  const latestGap = latest ? latest.actual - latest.expected : 0;
+
+  return (
+    <div className="expected-chart-card">
+      <div className="expected-chart-head">
+        <div>
+          <h3>Expected vs real monthly deposit</h3>
+          <p>{months[0]?.label ?? ""} - {months[months.length - 1]?.label ?? ""}</p>
+        </div>
+        <div className="chart-legend">
+          <span><i className="legend-expected" /> Expected</span>
+          <span><i className="legend-actual" /> Real</span>
+        </div>
+      </div>
+      <div className="expected-chart-summary">
+        <MiniStat label="Expected in period" value={formatBdt(expectedTotal)} />
+        <MiniStat label="Real in period" value={formatBdt(actualTotal)} />
+        <MiniStat label={gap >= 0 ? "Ahead" : "Behind"} value={formatBdt(Math.abs(gap))} />
+        <MiniStat label="Latest month" value={latest ? `${latest.actual >= latest.expected ? "Met" : "Short"} ${formatBdt(Math.abs(latestGap))}` : "No data"} />
+      </div>
+      <ExpectedActualLineChart
+        months={months}
+        className="expected-chart-full"
+        labelLimit={8}
+        ariaLabel="Full expected monthly deposit compared with real deposits"
+      />
+      <ExpectedActualLineChart
+        months={recentMonths}
+        className="expected-chart-compact"
+        labelLimit={6}
+        ariaLabel="Recent expected monthly deposit compared with real deposits"
+      />
+    </div>
+  );
+}
+
+function ExpectedActualLineChart({ months, className, labelLimit, ariaLabel }: {
+  months: ExpectedActualMonth[];
+  className: string;
+  labelLimit: number;
+  ariaLabel: string;
+}) {
+  const rawId = useId();
+  const gradientId = `actualDepositFill-${rawId.replace(/[^a-zA-Z0-9_-]/g, "")}`;
   const maxValue = Math.max(...months.flatMap((item) => [item.expected, item.actual]), 1);
   const width = 720;
   const height = 220;
@@ -578,59 +640,42 @@ function ExpectedVsActualChart({ contributions, expectedMonthly }: {
   const actualPath = actualPoints.map((point, index) => `${index === 0 ? "M" : "L"} ${point.x} ${point.y}`).join(" ");
   const expectedPath = expectedPoints.map((point, index) => `${index === 0 ? "M" : "L"} ${point.x} ${point.y}`).join(" ");
   const areaPath = `${actualPath} L ${padding.left + chartWidth} ${padding.top + chartHeight} L ${padding.left} ${padding.top + chartHeight} Z`;
-  const actualTotal = months.reduce((sum, item) => sum + item.actual, 0);
-  const expectedTotal = months.reduce((sum, item) => sum + item.expected, 0);
-  const gap = actualTotal - expectedTotal;
+  const labelStep = Math.max(1, Math.ceil(months.length / labelLimit));
 
   return (
-    <div className="expected-chart-card">
-      <div className="expected-chart-head">
-        <div>
-          <h3>Expected vs real monthly deposit</h3>
-          <p>{months[0]?.label ?? ""} - {months[months.length - 1]?.label ?? ""}</p>
-        </div>
-        <div className="chart-legend">
-          <span><i className="legend-expected" /> Expected</span>
-          <span><i className="legend-actual" /> Real</span>
-        </div>
-      </div>
-      <div className="expected-chart-summary">
-        <MiniStat label="Expected in period" value={formatBdt(expectedTotal)} />
-        <MiniStat label="Real in period" value={formatBdt(actualTotal)} />
-        <MiniStat label={gap >= 0 ? "Ahead" : "Behind"} value={formatBdt(Math.abs(gap))} />
-      </div>
-      <div className="expected-chart-wrap">
-        <svg viewBox={`0 0 ${width} ${height}`} role="img" aria-label="Expected monthly deposit compared with real deposits">
-          <defs>
-            <linearGradient id="actualDepositFill" x1="0" x2="0" y1="0" y2="1">
-              <stop offset="0%" stopColor="#8fb4f2" stopOpacity="0.58" />
-              <stop offset="100%" stopColor="#8fb4f2" stopOpacity="0.06" />
-            </linearGradient>
-          </defs>
-          {[0, 0.5, 1].map((ratio) => {
-            const y = padding.top + chartHeight * ratio;
-            return <line key={ratio} x1={padding.left} x2={padding.left + chartWidth} y1={y} y2={y} className="chart-grid-line" />;
-          })}
-          <path d={areaPath} className="actual-area-path" />
-          <path d={expectedPath} className="expected-line-path" />
-          <path d={actualPath} className="actual-line-path" />
-          {actualPoints.map((point) => (
-            <circle key={point.item.key} cx={point.x} cy={point.y} r="4" className="actual-chart-dot">
-              <title>{`${point.item.label}: real ${formatBdt(point.item.actual)}, expected ${formatBdt(point.item.expected)}`}</title>
-            </circle>
-          ))}
-          {months.map((item, index) => {
-            const x = padding.left + (months.length === 1 ? chartWidth / 2 : (index / (months.length - 1)) * chartWidth);
-            return (
-              <text key={item.key} x={x} y={height - 9} textAnchor="middle" className="chart-axis-label">
-                {item.label}
-              </text>
-            );
-          })}
-          <text x="8" y={padding.top + 8} className="chart-axis-label">{compactBdt(maxValue)}</text>
-          <text x="8" y={padding.top + chartHeight + 4} className="chart-axis-label">0</text>
-        </svg>
-      </div>
+    <div className={`expected-chart-wrap ${className}`}>
+      <svg viewBox={`0 0 ${width} ${height}`} role="img" aria-label={ariaLabel}>
+        <defs>
+          <linearGradient id={gradientId} x1="0" x2="0" y1="0" y2="1">
+            <stop offset="0%" stopColor="#8fb4f2" stopOpacity="0.58" />
+            <stop offset="100%" stopColor="#8fb4f2" stopOpacity="0.06" />
+          </linearGradient>
+        </defs>
+        {[0, 0.5, 1].map((ratio) => {
+          const y = padding.top + chartHeight * ratio;
+          return <line key={ratio} x1={padding.left} x2={padding.left + chartWidth} y1={y} y2={y} className="chart-grid-line" />;
+        })}
+        <path d={areaPath} className="actual-area-path" style={{ fill: `url(#${gradientId})` }} />
+        <path d={expectedPath} className="expected-line-path" />
+        <path d={actualPath} className="actual-line-path" />
+        {actualPoints.map((point) => (
+          <circle key={point.item.key} cx={point.x} cy={point.y} r="4" className="actual-chart-dot">
+            <title>{`${point.item.label}: real ${formatBdt(point.item.actual)}, expected ${formatBdt(point.item.expected)}`}</title>
+          </circle>
+        ))}
+        {months.map((item, index) => {
+          const shouldShowLabel = index === 0 || index === months.length - 1 || index % labelStep === 0;
+          if (!shouldShowLabel) return null;
+          const x = padding.left + (months.length === 1 ? chartWidth / 2 : (index / (months.length - 1)) * chartWidth);
+          return (
+            <text key={item.key} x={x} y={height - 9} textAnchor="middle" className="chart-axis-label">
+              {item.label}
+            </text>
+          );
+        })}
+        <text x="8" y={padding.top + 8} className="chart-axis-label">{compactBdt(maxValue)}</text>
+        <text x="8" y={padding.top + chartHeight + 4} className="chart-axis-label">0</text>
+      </svg>
     </div>
   );
 }
@@ -1202,7 +1247,7 @@ function AdminPaymentForm({ project, members, onSubmitted, onError }: {
   );
 }
 
-function AdminDashboard({ project, contributions, projectCollections, projectMemberCount, reviewerId, currentUserId, onProjectSaved, onReviewed, onError }: {
+function AdminDashboard({ project, contributions, projectCollections, projectMemberCount, reviewerId, currentUserId, onProjectSaved, onReviewed, onError, onSignOut }: {
   project: InvestmentProject | null;
   contributions: Contribution[];
   projectCollections: Contribution[];
@@ -1212,6 +1257,7 @@ function AdminDashboard({ project, contributions, projectCollections, projectMem
   onProjectSaved: () => Promise<void>;
   onReviewed: (message: string) => Promise<void>;
   onError: (message: string) => void;
+  onSignOut: () => Promise<void>;
 }) {
   const [activeSection, setActiveSection] = useState<AdminSection>("overview");
   const [sidebarOpen, setSidebarOpen] = useState(false);
@@ -1274,6 +1320,11 @@ function AdminDashboard({ project, contributions, projectCollections, projectMem
     setSidebarOpen(false);
   }
 
+  function handleSignOut() {
+    setSidebarOpen(false);
+    void onSignOut();
+  }
+
   const activeNavItem = navItemsConfig(pending.length, members.length).find((item) => item.id === activeSection);
   const navItems = navItemsConfig(pending.length, members.length);
 
@@ -1310,6 +1361,11 @@ function AdminDashboard({ project, contributions, projectCollections, projectMem
               <small>{item.detail}</small>
             </button>
           ))}
+          <button className="nav-logout" type="button" onClick={handleSignOut}>
+            <span><LogOut size={17} /></span>
+            <strong>Log out</strong>
+            <small>End session</small>
+          </button>
         </nav>
       </aside>
 

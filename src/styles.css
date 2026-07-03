@@ -882,6 +882,19 @@ button:disabled {
   color: #dce9e3;
 }
 
+.admin-nav button.nav-logout {
+  color: #8f2b2b;
+}
+
+.admin-nav button.nav-logout span {
+  background: #fee7e7;
+  color: #9d2424;
+}
+
+.admin-nav button.nav-logout:hover {
+  background: #fff1f1;
+}
+
 .admin-content {
   min-width: 0;
   overflow: hidden;
@@ -1125,7 +1138,7 @@ button:disabled {
 
 .expected-chart-summary {
   display: grid;
-  grid-template-columns: repeat(3, minmax(0, 1fr));
+  grid-template-columns: repeat(4, minmax(0, 1fr));
   gap: 10px;
   margin: 14px 0 10px;
 }
@@ -1141,8 +1154,13 @@ button:disabled {
 
 .expected-chart-wrap svg {
   width: 100%;
-  min-height: 210px;
+  height: auto;
+  min-height: 180px;
   display: block;
+}
+
+.expected-chart-compact {
+  display: none;
 }
 
 .chart-grid-line {
@@ -1151,7 +1169,7 @@ button:disabled {
 }
 
 .actual-area-path {
-  fill: url("#actualDepositFill");
+  fill: #8fb4f2;
 }
 
 .expected-line-path,
@@ -2152,15 +2170,24 @@ th {
   }
 
   .expected-chart-summary {
-    grid-template-columns: 1fr;
+    grid-template-columns: repeat(2, minmax(0, 1fr));
+  }
+
+  .expected-chart-card {
+    padding: 12px;
+    margin-top: 18px;
+  }
+
+  .expected-chart-full {
+    display: none;
+  }
+
+  .expected-chart-compact {
+    display: block;
   }
 
   .expected-chart-wrap svg {
-    min-width: 620px;
-  }
-
-  .expected-chart-wrap {
-    overflow-x: auto;
+    min-height: 156px;
   }
 
   .target-progress-ring {
