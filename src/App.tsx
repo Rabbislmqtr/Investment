@@ -9,14 +9,19 @@ import {
   ChevronRight,
   Clock3,
   Download,
+  Eye,
+  EyeOff,
   FileText,
   Filter,
   LayoutDashboard,
   LogOut,
+  LockKeyhole,
+  Mail,
   Menu,
   ReceiptText,
   Settings,
   ShieldCheck,
+  TrendingUp,
   Upload,
   Users,
   UserRound,
@@ -242,6 +247,7 @@ function AuthScreen() {
   const [password, setPassword] = useState("");
   const [fullName, setFullName] = useState("");
   const [mode, setMode] = useState<"login" | "signup">("login");
+  const [showPassword, setShowPassword] = useState(false);
   const [busy, setBusy] = useState(false);
   const [message, setMessage] = useState<string | null>(null);
 
@@ -269,35 +275,103 @@ function AuthScreen() {
 
   return (
     <PageShell compact>
-      <main className="auth-layout">
+      <main className="auth-layout auth-showcase">
         <section className="auth-copy">
-          <p className="eyebrow">Home Investment</p>
-          <h1>Contribution records for the land and home fund</h1>
-          <p>Members can submit payment proof and track approved BDT contributions. Admins can review receipts and keep the ledger clean.</p>
+          <div className="auth-brand">
+            <span><LayoutDashboard size={22} /></span>
+            <strong>HomeFund</strong>
+          </div>
+          <span className="live-badge"><TrendingUp size={14} /> Live investment ledger</span>
+          <h1>Your fund, fully in view.</h1>
+          <p>Track land and home investment contributions, approvals, member status, and project progress from one secure dashboard.</p>
+          <div className="auth-stats">
+            <div>
+              <strong>BDT</strong>
+              <span>Ledger</span>
+            </div>
+            <div>
+              <strong>2</strong>
+              <span>Members</span>
+            </div>
+            <div>
+              <strong>24/7</strong>
+              <span>Access</span>
+            </div>
+          </div>
+          <div className="auth-chart" aria-hidden="true">
+            <span style={{ height: "28%" }} />
+            <span style={{ height: "42%" }} />
+            <span style={{ height: "58%" }} />
+            <span style={{ height: "38%" }} />
+            <span style={{ height: "68%" }} />
+            <span style={{ height: "52%" }} />
+            <span style={{ height: "78%" }} />
+            <span style={{ height: "45%" }} />
+            <span style={{ height: "86%" }} />
+          </div>
         </section>
-        <form className="panel auth-panel" onSubmit={(event) => void submit(event)}>
-          <div className="segmented-control full">
+        <form className="auth-panel" onSubmit={(event) => void submit(event)}>
+          <div className="auth-panel-head">
+            <h1>{mode === "login" ? "Welcome back" : "Create account"}</h1>
+            <p>{mode === "login" ? "Sign in to your investment dashboard" : "Create your member account"}</p>
+          </div>
+          <div className="segmented-control full auth-tabs">
             <button type="button" className={mode === "login" ? "active" : ""} onClick={() => setMode("login")}>Login</button>
-            <button type="button" className={mode === "signup" ? "active" : ""} onClick={() => setMode("signup")}>Create account</button>
+            <button type="button" className={mode === "signup" ? "active" : ""} onClick={() => setMode("signup")}>Sign up</button>
           </div>
           {mode === "signup" && (
-            <label>
+            <label className="auth-field">
               Full name
-              <input value={fullName} onChange={(event) => setFullName(event.target.value)} required />
+              <span>
+                <UserRound size={18} />
+                <input value={fullName} onChange={(event) => setFullName(event.target.value)} required />
+              </span>
             </label>
           )}
-          <label>
+          <label className="auth-field">
             Email
-            <input type="email" value={email} onChange={(event) => setEmail(event.target.value)} required />
+            <span>
+              <Mail size={18} />
+              <input type="email" value={email} onChange={(event) => setEmail(event.target.value)} required />
+            </span>
           </label>
-          <label>
+          <label className="auth-field">
             Password
-            <input type="password" minLength={6} value={password} onChange={(event) => setPassword(event.target.value)} required />
+            <span>
+              <LockKeyhole size={18} />
+              <input type={showPassword ? "text" : "password"} minLength={6} value={password} onChange={(event) => setPassword(event.target.value)} required />
+              <button
+                className="password-toggle"
+                type="button"
+                onClick={() => setShowPassword((current) => !current)}
+                aria-label={showPassword ? "Hide password" : "Show password"}
+                title={showPassword ? "Hide password" : "Show password"}
+              >
+                {showPassword ? <EyeOff size={18} /> : <Eye size={18} />}
+              </button>
+            </span>
           </label>
-          <button className="primary-button" type="submit" disabled={busy}>
-            {busy ? "Please wait" : mode === "login" ? "Login" : "Create account"}
+          <div className="auth-row">
+            <label className="remember-choice">
+              <input type="checkbox" defaultChecked />
+              <span>Remember me</span>
+            </label>
+            <button type="button" className="text-button">Forgot password?</button>
+          </div>
+          <button className="primary-button auth-submit" type="submit" disabled={busy}>
+            {busy ? "Please wait" : mode === "login" ? "Sign in to dashboard" : "Create account"}
           </button>
           {message && <p className="form-message">{message}</p>}
+          <p className="auth-switch">
+            {mode === "login" ? "Don't have an account?" : "Already have an account?"}
+            <button type="button" onClick={() => setMode(mode === "login" ? "signup" : "login")}>
+              {mode === "login" ? "Create one" : "Login"}
+            </button>
+          </p>
+          <div className="auth-security">
+            <span><ShieldCheck size={14} /> Private ledger</span>
+            <span><CheckCircle2 size={14} /> Protected receipts</span>
+          </div>
         </form>
       </main>
     </PageShell>
