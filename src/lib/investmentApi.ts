@@ -353,6 +353,82 @@ export async function submitContribution(input: {
   if (receiptError) throw receiptError;
 }
 
+async function getAdminSessionToken() {
+  const { data, error } = await supabase.auth.getSession();
+  if (error) throw error;
+  const token = data.session?.access_token;
+  if (!token) throw new Error("Admin session is required.");
+  return token;
+}
+
+async function postAdminFunction<T>(path: string, body: unknown): Promise<T> {
+  const token = await getAdminSessionToken();
+  const response = await fetch(path, {
+    method: "POST",
+    headers: {
+      "Authorization": `Bearer ${token}`,
+      "Content-Type": "application/json",
+    },
+    body: JSON.stringify(body),
+  });
+
+  const result = await response.json().catch(() => ({}));
+  if (!response.ok) {
+    throw new Error(typeof result.error === "string" ? result.error : "Admin action failed.");
+  }
+
+  return result as T;
+}
+
+async function fileToBase64(file: File) {
+  return new Promise<string>((resolve, reject) => {
+    const reader = new FileReader();
+    reader.onload = () => {
+      const result = typeof reader.result === "string" ? reader.result : "";
+      resolve(result.includes(",") ? result.split(",")[1] : result);
+    };
+    reader.onerror = () => reject(reader.error ?? new Error("Could not read receipt file."));
+    reader.readAsDataURL(file);
+  });
+}
+
+export async function createAdminMember(input: {
+  projectId: string;
+  fullName: string;
+  email: string;
+  password: string;
+  phone?: string | null;
+  residentCountry?: string | null;
+  memberCode?: string | null;
+  joinedAt: string;
+  status: MembershipStatus;
+}) {
+  return postAdminFunction<{ memberId: string }>("/.netlify/functions/admin-create-member", input);
+}
+
+export async function submitAdminApprovedContribution(input: {
+  projectId: string;
+  memberId: string;
+  paymentDate: string;
+  bdtAmount: number;
+  sourceCurrency?: string;
+  sourceAmount?: number;
+  exchangeRate?: number;
+  sentFromCountry?: string;
+  paymentMethod?: string;
+  notes?: string;
+  receipt: File;
+}) {
+  const fileBase64 = await fileToBase64(input.receipt);
+  return postAdminFunction<{ contributionId: string }>("/.netlify/functions/admin-submit-member-payment", {
+    ...input,
+    receipt: undefined,
+    fileName: input.receipt.name,
+    fileType: input.receipt.type,
+    fileBase64,
+  });
+}
+
 export async function reviewContribution(input: {
   contributionId: string;
   reviewerId: string;

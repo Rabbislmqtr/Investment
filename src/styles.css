@@ -625,6 +625,17 @@ textarea:focus {
   border-color: #518b70;
 }
 
+.field-with-action {
+  display: flex;
+  align-items: center;
+  gap: 8px;
+}
+
+.field-with-action input {
+  min-width: 0;
+  flex: 1;
+}
+
 .primary-button,
 .secondary-button,
 .approve-button,
@@ -1545,6 +1556,43 @@ th {
   margin-bottom: 14px;
 }
 
+.admin-create-member {
+  border: 1px solid #e0e7e3;
+  border-radius: 8px;
+  background: #fbfcfb;
+  padding: 14px;
+  margin-bottom: 14px;
+}
+
+.admin-create-member-head {
+  display: flex;
+  justify-content: space-between;
+  gap: 12px;
+  align-items: flex-start;
+  margin-bottom: 12px;
+}
+
+.admin-create-member-head h3,
+.admin-create-member-head p {
+  margin: 0;
+}
+
+.admin-create-member-head h3 {
+  color: #16352b;
+  font-size: 1rem;
+}
+
+.admin-create-member-head p {
+  margin-top: 4px;
+  color: #64746d;
+  font-weight: 700;
+}
+
+.add-member-submit {
+  width: auto;
+  min-width: 160px;
+}
+
 .member-list {
   display: grid;
   gap: 12px;
@@ -2060,6 +2108,10 @@ th {
     gap: 10px;
   }
 
+  .admin-create-member-head {
+    display: grid;
+  }
+
   .member-card-grid {
     grid-template-columns: 1fr;
   }
@@ -2069,6 +2121,10 @@ th {
   }
 
   .member-card .secondary-button {
+    width: 100%;
+  }
+
+  .add-member-submit {
     width: 100%;
   }
 

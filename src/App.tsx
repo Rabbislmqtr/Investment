@@ -30,6 +30,7 @@ import {
 import type { Contribution, InvestmentProject, MemberPaymentStatus, MemberRecord, MembershipStatus, Profile, ProfileRole } from "./types";
 import {
   calculateTotals,
+  createAdminMember,
   getActiveProject,
   getAdminContributions,
   getAdminMembers,
@@ -39,6 +40,7 @@ import {
   getProjectApprovedContributions,
   getSignedReceiptUrl,
   reviewContribution,
+  submitAdminApprovedContribution,
   submitContribution,
   updateMemberRecord,
   updateProjectSettings,
@@ -48,7 +50,7 @@ import { formatBdt, formatDate, fileSizeLabel } from "./lib/format";
 import { hasSupabaseConfig, supabase } from "./lib/supabase";
 
 type ViewMode = "member" | "admin";
-type AdminSection = "overview" | "review" | "reports" | "members" | "project";
+type AdminSection = "overview" | "review" | "submit" | "reports" | "members" | "project";
 type MemberSection = "overview" | "submit" | "status" | "history" | "profile";
 
 type MemberFilterOption = {
@@ -897,6 +899,165 @@ function PaymentForm({ userId, project, onSubmitted, onError }: {
   );
 }
 
+function AdminPaymentForm({ project, members, onSubmitted, onError }: {
+  project: InvestmentProject;
+  members: MemberRecord[];
+  onSubmitted: () => Promise<void>;
+  onError: (message: string) => void;
+}) {
+  const activeMembers = useMemo(
+    () => members
+      .filter((member) => isMemberAccount(member) && getEffectiveMembershipStatus(member) !== "left")
+      .sort((a, b) => (a.full_name || a.email || "").localeCompare(b.full_name || b.email || "")),
+    [members],
+  );
+  const [memberId, setMemberId] = useState(activeMembers[0]?.id ?? "");
+  const [paymentDate, setPaymentDate] = useState(new Date().toISOString().slice(0, 10));
+  const [bdtAmount, setBdtAmount] = useState("");
+  const [sourceCurrency, setSourceCurrency] = useState("");
+  const [sourceAmount, setSourceAmount] = useState("");
+  const [exchangeRate, setExchangeRate] = useState("");
+  const [country, setCountry] = useState("");
+  const [method, setMethod] = useState("");
+  const [notes, setNotes] = useState("");
+  const [receipt, setReceipt] = useState<File | null>(null);
+  const [busy, setBusy] = useState(false);
+
+  useEffect(() => {
+    if (!memberId && activeMembers[0]) {
+      // eslint-disable-next-line react-hooks/set-state-in-effect
+      setMemberId(activeMembers[0].id);
+    }
+  }, [activeMembers, memberId]);
+
+  async function submit(event: React.FormEvent<HTMLFormElement>) {
+    event.preventDefault();
+    if (!memberId) {
+      onError("Select a member first.");
+      return;
+    }
+    if (!receipt) {
+      onError("Attach a PDF, JPG, or PNG payment proof.");
+      return;
+    }
+    if (!allowedReceiptTypes.includes(receipt.type)) {
+      onError("Receipt must be PDF, JPG, or PNG.");
+      return;
+    }
+
+    setBusy(true);
+    try {
+      await submitAdminApprovedContribution({
+        projectId: project.id,
+        memberId,
+        paymentDate,
+        bdtAmount: Number(bdtAmount),
+        sourceCurrency,
+        sourceAmount: sourceAmount ? Number(sourceAmount) : undefined,
+        exchangeRate: exchangeRate ? Number(exchangeRate) : undefined,
+        sentFromCountry: country,
+        paymentMethod: method,
+        notes,
+        receipt,
+      });
+      setBdtAmount("");
+      setSourceCurrency("");
+      setSourceAmount("");
+      setExchangeRate("");
+      setCountry("");
+      setMethod("");
+      setNotes("");
+      setReceipt(null);
+      await onSubmitted();
+    } catch (err) {
+      onError(getErrorMessage(err, "Could not submit member payment."));
+    } finally {
+      setBusy(false);
+    }
+  }
+
+  if (activeMembers.length === 0) {
+    return (
+      <section className="panel payment-panel">
+        <div className="panel-title">
+          <Upload size={20} />
+          <h2>Submit payment for member</h2>
+        </div>
+        <EmptyState text="Add an active member before submitting payment proof on their behalf." />
+      </section>
+    );
+  }
+
+  return (
+    <form className="panel payment-panel" onSubmit={(event) => void submit(event)}>
+      <div className="panel-title split-title">
+        <div>
+          <span className="title-icon"><Upload size={20} /></span>
+          <h2>Submit payment for member</h2>
+        </div>
+        <span className="count-badge">Auto approved</span>
+      </div>
+      <label>
+        Member
+        <select value={memberId} onChange={(event) => setMemberId(event.target.value)} required>
+          {activeMembers.map((member) => (
+            <option key={member.id} value={member.id}>
+              {member.full_name || member.email || "Member"}{member.membership?.member_code ? ` / ${member.membership.member_code}` : ""}
+            </option>
+          ))}
+        </select>
+      </label>
+      <div className="form-grid">
+        <label>
+          Payment date
+          <input type="date" value={paymentDate} onChange={(event) => setPaymentDate(event.target.value)} required />
+        </label>
+        <label>
+          BDT amount
+          <input type="number" min="1" step="0.01" value={bdtAmount} onChange={(event) => setBdtAmount(event.target.value)} required />
+        </label>
+        <label>
+          Source currency
+          <input value={sourceCurrency} onChange={(event) => setSourceCurrency(event.target.value.toUpperCase())} placeholder="SAR, AED, QAR" />
+        </label>
+        <label>
+          Source amount
+          <input type="number" min="0" step="0.01" value={sourceAmount} onChange={(event) => setSourceAmount(event.target.value)} />
+        </label>
+        <label>
+          Exchange rate
+          <input type="number" min="0" step="0.000001" value={exchangeRate} onChange={(event) => setExchangeRate(event.target.value)} />
+        </label>
+        <label>
+          Sent from
+          <input value={country} onChange={(event) => setCountry(event.target.value)} placeholder="Saudi Arabia" />
+        </label>
+      </div>
+      <label>
+        Payment method
+        <input value={method} onChange={(event) => setMethod(event.target.value)} placeholder="Bank transfer, cash deposit..." />
+      </label>
+      <label>
+        Notes
+        <textarea value={notes} onChange={(event) => setNotes(event.target.value)} rows={3} placeholder="Optional admin note" />
+      </label>
+      <label className="file-picker">
+        <FileText size={18} />
+        <span>{receipt ? `${receipt.name} (${fileSizeLabel(receipt.size)})` : "Attach PDF, JPG, or PNG receipt"}</span>
+        <input
+          type="file"
+          accept="application/pdf,image/jpeg,image/png,image/jpg"
+          onChange={(event) => setReceipt(event.target.files?.[0] ?? null)}
+          required
+        />
+      </label>
+      <button className="primary-button" type="submit" disabled={busy}>
+        {busy ? "Submitting" : "Submit and approve"}
+      </button>
+    </form>
+  );
+}
+
 function AdminDashboard({ project, contributions, projectCollections, reviewerId, currentUserId, onProjectSaved, onReviewed, onError }: {
   project: InvestmentProject | null;
   contributions: Contribution[];
@@ -1027,6 +1188,18 @@ function AdminDashboard({ project, contributions, projectCollections, reviewerId
           />
         )}
 
+        {activeSection === "submit" && project && (
+          <AdminPaymentForm
+            project={project}
+            members={members}
+            onSubmitted={async () => {
+              await onReviewed("Payment proof submitted and approved.");
+              await loadMembers();
+            }}
+            onError={onError}
+          />
+        )}
+
         {activeSection === "reports" && <AdminReportPanel contributions={contributions} onOpenReceipt={openContributionReceipt} />}
 
         {activeSection === "members" && project && (
@@ -1056,6 +1229,7 @@ function navItemsConfig(pendingCount: number, memberCount: number): Array<{ id: 
   return [
     { id: "overview", label: "Overview", icon: <LayoutDashboard size={17} />, detail: "Fund health" },
     { id: "review", label: "Review", icon: <ShieldCheck size={17} />, detail: `${pendingCount} pending` },
+    { id: "submit", label: "Submit", icon: <Upload size={17} />, detail: "For member" },
     { id: "reports", label: "Reports", icon: <Filter size={17} />, detail: "Approved ledger" },
     { id: "members", label: "Members", icon: <Users size={17} />, detail: `${memberCount} users` },
     { id: "project", label: "Project", icon: <Settings size={17} />, detail: "Setup" },
@@ -1586,6 +1760,14 @@ function MemberManagementPanel({ projectId, currentUserId, members, loading, onR
       <p className="helper-text">
         Member accounts can hold project membership details. Admin accounts are access-only and cannot be saved as project members.
       </p>
+      <AdminCreateMemberForm
+        projectId={projectId}
+        onCreated={async () => {
+          setMessage("Member account created.");
+          await onReload();
+        }}
+        onError={onError}
+      />
       <div className="member-toolbar">
         <input
           value={search}
@@ -1616,6 +1798,142 @@ function MemberManagementPanel({ projectId, currentUserId, members, loading, onR
         </div>
       )}
     </section>
+  );
+}
+
+function AdminCreateMemberForm({ projectId, onCreated, onError }: {
+  projectId: string;
+  onCreated: () => Promise<void>;
+  onError: (message: string) => void;
+}) {
+  const [fullName, setFullName] = useState("");
+  const [email, setEmail] = useState("");
+  const [password, setPassword] = useState("");
+  const [showPassword, setShowPassword] = useState(false);
+  const [phoneCode, setPhoneCode] = useState("+880");
+  const [phone, setPhone] = useState("");
+  const [country, setCountry] = useState("");
+  const [memberCode, setMemberCode] = useState("");
+  const [joinedAt, setJoinedAt] = useState(new Date().toISOString().slice(0, 10));
+  const [status, setStatus] = useState<MembershipStatus>("active");
+  const [busy, setBusy] = useState(false);
+  const [open, setOpen] = useState(true);
+
+  async function submit(event: React.FormEvent<HTMLFormElement>) {
+    event.preventDefault();
+    setBusy(true);
+    try {
+      await createAdminMember({
+        projectId,
+        fullName: fullName.trim(),
+        email: email.trim(),
+        password,
+        phone: joinPhoneNumber(phoneCode, phone),
+        residentCountry: country.trim() || null,
+        memberCode: memberCode.trim() || null,
+        joinedAt,
+        status,
+      });
+      setFullName("");
+      setEmail("");
+      setPassword("");
+      setPhoneCode("+880");
+      setPhone("");
+      setCountry("");
+      setMemberCode("");
+      setJoinedAt(new Date().toISOString().slice(0, 10));
+      setStatus("active");
+      await onCreated();
+    } catch (err) {
+      onError(getErrorMessage(err, "Could not create member."));
+    } finally {
+      setBusy(false);
+    }
+  }
+
+  return (
+    <div className="admin-create-member">
+      <div className="admin-create-member-head">
+        <div>
+          <h3>Add member</h3>
+          <p>Create login access and add the person to this project.</p>
+        </div>
+        <button className="secondary-button" type="button" onClick={() => setOpen((current) => !current)}>
+          {open ? "Hide" : "Add user"}
+        </button>
+      </div>
+      {open && (
+        <form onSubmit={(event) => void submit(event)}>
+          <div className="member-card-grid">
+            <label>
+              Full name
+              <input value={fullName} onChange={(event) => setFullName(event.target.value)} required />
+            </label>
+            <label>
+              Email
+              <input type="email" value={email} onChange={(event) => setEmail(event.target.value)} required />
+            </label>
+            <label>
+              Temporary password
+              <span className="field-with-action">
+                <input
+                  type={showPassword ? "text" : "password"}
+                  minLength={6}
+                  value={password}
+                  onChange={(event) => setPassword(event.target.value)}
+                  required
+                />
+                <button
+                  className="password-toggle"
+                  type="button"
+                  onClick={() => setShowPassword((current) => !current)}
+                  aria-label={showPassword ? "Hide password" : "Show password"}
+                  title={showPassword ? "Hide password" : "Show password"}
+                >
+                  {showPassword ? <EyeOff size={18} /> : <Eye size={18} />}
+                </button>
+              </span>
+            </label>
+            <label>
+              Phone
+              <div className="phone-input">
+                <select value={phoneCode} onChange={(event) => setPhoneCode(event.target.value)} aria-label="Phone country code">
+                  {phoneCountryCodes.map((item) => (
+                    <option key={item.code} value={item.code}>
+                      {item.code} {item.label}
+                    </option>
+                  ))}
+                </select>
+                <input inputMode="numeric" value={phone} onChange={(event) => setPhone(event.target.value)} />
+              </div>
+            </label>
+            <label>
+              Country
+              <input value={country} onChange={(event) => setCountry(event.target.value)} />
+            </label>
+            <label>
+              Member code
+              <input value={memberCode} onChange={(event) => setMemberCode(event.target.value)} placeholder="M-001" />
+            </label>
+            <label>
+              Joined date
+              <input type="date" value={joinedAt} onChange={(event) => setJoinedAt(event.target.value)} />
+            </label>
+            <label>
+              Status
+              <select value={status} onChange={(event) => setStatus(event.target.value as MembershipStatus)}>
+                <option value="active">Active</option>
+                <option value="paused">Paused</option>
+                <option value="left">Left</option>
+              </select>
+            </label>
+          </div>
+          <button className="primary-button add-member-submit" type="submit" disabled={busy}>
+            {busy ? "Creating" : "Create member"}
+          </button>
+        </form>
+      )}
+    </div>
   );
 }
 
