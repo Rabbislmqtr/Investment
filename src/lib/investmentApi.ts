@@ -12,6 +12,54 @@ import type {
 import { supabase } from "./supabase";
 
 const RECEIPT_BUCKET = "payment-receipts";
+export const PROJECT_START_MONTH = "2026-01";
+export const MONTHLY_MEMBER_CONTRIBUTION_BDT = 10000;
+export const BASE_TARGET_MEMBER_COUNT = 10;
+export const PROJECT_PLAN_MONTHS = 36;
+
+function monthSerial(month: string) {
+  const [year, monthNumber] = month.slice(0, 7).split("-").map(Number);
+  return year * 12 + monthNumber - 1;
+}
+
+function monthFromSerial(serial: number) {
+  const year = Math.floor(serial / 12);
+  const month = serial % 12;
+  return `${year}-${String(month + 1).padStart(2, "0")}`;
+}
+
+export function getScaledProjectTarget(baseTargetBdt: number, activeMemberCount: number) {
+  const planMemberCount = Math.max(BASE_TARGET_MEMBER_COUNT, activeMemberCount);
+  const ruleBasedTarget = planMemberCount * MONTHLY_MEMBER_CONTRIBUTION_BDT * PROJECT_PLAN_MONTHS;
+  if (baseTargetBdt <= 0) return ruleBasedTarget;
+  const baseTargetPerMember = baseTargetBdt / BASE_TARGET_MEMBER_COUNT;
+  return Math.round(Math.max(ruleBasedTarget, baseTargetPerMember * planMemberCount));
+}
+
+export function getMonthlyPaymentCoverage(totalApprovedBdt: number, selectedMonth: string) {
+  const startSerial = monthSerial(PROJECT_START_MONTH);
+  const selectedSerial = monthSerial(selectedMonth);
+  const dueMonths = Math.max(0, selectedSerial - startSerial + 1);
+  const paidMonths = Math.floor(Math.max(0, totalApprovedBdt) / MONTHLY_MEMBER_CONTRIBUTION_BDT);
+  const paidThroughMonth = paidMonths > 0 ? monthFromSerial(startSerial + paidMonths - 1) : null;
+  const requiredBySelectedMonth = dueMonths * MONTHLY_MEMBER_CONTRIBUTION_BDT;
+  const remainingDueBdt = Math.max(0, requiredBySelectedMonth - totalApprovedBdt);
+  const coveragePercent = requiredBySelectedMonth > 0
+    ? Math.min(100, (totalApprovedBdt / requiredBySelectedMonth) * 100)
+    : 100;
+
+  return {
+    paid: paidMonths >= dueMonths,
+    dueMonths,
+    paidMonths,
+    overdueMonths: Math.max(0, dueMonths - paidMonths),
+    advanceMonths: Math.max(0, paidMonths - dueMonths),
+    creditBdt: Math.max(0, totalApprovedBdt % MONTHLY_MEMBER_CONTRIBUTION_BDT),
+    remainingDueBdt,
+    coveragePercent,
+    paidThroughMonth,
+  };
+}
 
 export async function getCurrentProfile(userId: string): Promise<Profile | null> {
   const { data, error } = await supabase
@@ -93,6 +141,17 @@ export async function getAdminMembers(projectId: string): Promise<MemberRecord[]
     ...profile,
     membership: membershipByUser.get(profile.id) ?? null,
   })) as MemberRecord[];
+}
+
+export async function getProjectMemberCount(projectId: string): Promise<number> {
+  const { count, error } = await supabase
+    .from("group_members")
+    .select("id", { count: "exact", head: true })
+    .eq("project_id", projectId)
+    .neq("status", "left");
+
+  if (error) throw error;
+  return count ?? 0;
 }
 
 export async function updateMemberRecord(input: {
@@ -181,11 +240,6 @@ export async function getMemberPaymentStatus(
   month: string,
   options: { includeFinancialDetails?: boolean } = {},
 ): Promise<MemberPaymentStatus[]> {
-  const monthStart = `${month}-01`;
-  const nextMonth = new Date(`${monthStart}T00:00:00`);
-  nextMonth.setMonth(nextMonth.getMonth() + 1);
-  const nextMonthStart = nextMonth.toISOString().slice(0, 10);
-
   const { data: memberships, error: membershipsError } = await supabase
     .from("group_members")
     .select("id, project_id, user_id, member_code, joined_at, status")
@@ -204,15 +258,11 @@ export async function getMemberPaymentStatus(
         .select("id, member_id, payment_date, bdt_amount, payment_method, payment_receipts(file_name, storage_path)")
         .eq("project_id", projectId)
         .eq("status", "approved")
-        .gte("payment_date", monthStart)
-        .lt("payment_date", nextMonthStart)
     : supabase
         .from("contributions")
-        .select("id, member_id, payment_date")
+        .select("id, member_id, payment_date, bdt_amount, payment_method")
         .eq("project_id", projectId)
-        .eq("status", "approved")
-        .gte("payment_date", monthStart)
-        .lt("payment_date", nextMonthStart);
+        .eq("status", "approved");
 
   const [{ data: profiles, error: profilesError }, contributionResult] = await Promise.all([
     supabase
@@ -229,7 +279,7 @@ export async function getMemberPaymentStatus(
     id: string;
     member_id: string;
     payment_date: string;
-    bdt_amount?: number | null;
+    bdt_amount: number | null;
     payment_method?: string | null;
     payment_receipts?: Array<{ file_name: string | null; storage_path: string | null }> | null;
   };
@@ -251,9 +301,8 @@ export async function getMemberPaymentStatus(
       const sortedContributions = memberContributions
         .slice()
         .sort((a, b) => b.payment_date.localeCompare(a.payment_date));
-      const approvedTotalBdt = options.includeFinancialDetails
-        ? memberContributions.reduce((sum, contribution) => sum + Number(contribution.bdt_amount ?? 0), 0)
-        : 0;
+      const approvedTotalBdt = memberContributions.reduce((sum, contribution) => sum + Number(contribution.bdt_amount ?? 0), 0);
+      const coverage = getMonthlyPaymentCoverage(approvedTotalBdt, month);
       const lastContribution = sortedContributions[0];
       const receipt = options.includeFinancialDetails ? lastContribution?.payment_receipts?.[0] : null;
 
@@ -263,9 +312,17 @@ export async function getMemberPaymentStatus(
         email: profile?.email ?? null,
         memberCode: membership.member_code,
         membershipStatus: membership.status,
-        paid: memberContributions.length > 0,
+        paid: coverage.paid,
         approvedTotalBdt,
         paymentCount: memberContributions.length,
+        dueMonths: coverage.dueMonths,
+        paidMonths: coverage.paidMonths,
+        overdueMonths: coverage.overdueMonths,
+        advanceMonths: coverage.advanceMonths,
+        creditBdt: coverage.creditBdt,
+        remainingDueBdt: coverage.remainingDueBdt,
+        coveragePercent: coverage.coveragePercent,
+        paidThroughMonth: coverage.paidThroughMonth,
         lastPaymentDate: lastContribution?.payment_date ?? null,
         lastPaymentMethod: lastContribution?.payment_method ?? null,
         receiptFileName: receipt?.file_name ?? null,

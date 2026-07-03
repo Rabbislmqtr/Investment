@@ -29,15 +29,22 @@ import {
 } from "lucide-react";
 import type { Contribution, InvestmentProject, MemberPaymentStatus, MemberRecord, MembershipStatus, Profile, ProfileRole } from "./types";
 import {
+  BASE_TARGET_MEMBER_COUNT,
+  MONTHLY_MEMBER_CONTRIBUTION_BDT,
+  PROJECT_PLAN_MONTHS,
+  PROJECT_START_MONTH,
   calculateTotals,
   createAdminMember,
   getActiveProject,
   getAdminContributions,
   getAdminMembers,
   getCurrentProfile,
+  getMonthlyPaymentCoverage,
   getMemberContributions,
   getMemberPaymentStatus,
   getProjectApprovedContributions,
+  getProjectMemberCount,
+  getScaledProjectTarget,
   getSignedReceiptUrl,
   reviewContribution,
   submitAdminApprovedContribution,
@@ -50,7 +57,7 @@ import { formatBdt, formatDate, fileSizeLabel } from "./lib/format";
 import { hasSupabaseConfig, supabase } from "./lib/supabase";
 
 type ViewMode = "member" | "admin";
-type AdminSection = "overview" | "review" | "submit" | "reports" | "members" | "project";
+type AdminSection = "overview" | "review" | "submit" | "status" | "reports" | "members" | "project";
 type MemberSection = "overview" | "submit" | "status" | "history" | "profile";
 
 type MemberFilterOption = {
@@ -128,6 +135,7 @@ function InvestmentApp({ session }: { session: Session }) {
   const [project, setProject] = useState<InvestmentProject | null>(null);
   const [contributions, setContributions] = useState<Contribution[]>([]);
   const [projectCollections, setProjectCollections] = useState<Contribution[]>([]);
+  const [projectMemberCount, setProjectMemberCount] = useState(0);
   const [mode, setMode] = useState<ViewMode>("member");
   const [loading, setLoading] = useState(true);
   const [message, setMessage] = useState<string | null>(null);
@@ -146,6 +154,7 @@ function InvestmentApp({ session }: { session: Session }) {
 
       setProfile(profileData);
       setProject(projectData);
+      setProjectMemberCount(projectData ? await getProjectMemberCount(projectData.id) : 0);
 
       const effectiveMode = profileData?.role === "admin" ? "admin" : nextMode ?? "member";
       setMode(effectiveMode);
@@ -210,6 +219,7 @@ function InvestmentApp({ session }: { session: Session }) {
           project={project}
           contributions={contributions}
           projectCollections={projectCollections}
+          projectMemberCount={projectMemberCount}
           reviewerId={session.user.id}
           currentUserId={session.user.id}
           onProjectSaved={async () => {
@@ -229,6 +239,7 @@ function InvestmentApp({ session }: { session: Session }) {
           project={project}
           contributions={contributions}
           projectCollections={projectCollections}
+          projectMemberCount={projectMemberCount}
           onSavedProfile={async () => {
             setMessage("Profile saved.");
             await loadData("member");
@@ -386,6 +397,7 @@ function MemberDashboard(props: {
   project: InvestmentProject | null;
   contributions: Contribution[];
   projectCollections: Contribution[];
+  projectMemberCount: number;
   onSavedProfile: () => Promise<void>;
   onSubmitted: () => Promise<void>;
   onError: (message: string) => void;
@@ -446,6 +458,7 @@ function MemberDashboard(props: {
             project={props.project}
             contributions={props.contributions}
             projectCollections={props.projectCollections}
+            projectMemberCount={props.projectMemberCount}
             totals={totals}
             onNavigate={selectSection}
           />
@@ -486,9 +499,16 @@ function memberNavItemsConfig(pendingCount: number, approvedCount: number): Arra
   ];
 }
 
-function TargetProgressCard({ collected, target }: { collected: number; target: number }) {
+function TargetProgressCard({ collected, target, contributions, activeMemberCount }: {
+  collected: number;
+  target: number;
+  contributions: Contribution[];
+  activeMemberCount: number;
+}) {
   const progress = target > 0 ? Math.min(100, (collected / target) * 100) : 0;
   const remaining = Math.max(0, target - collected);
+  const planMemberCount = Math.max(BASE_TARGET_MEMBER_COUNT, activeMemberCount);
+  const expectedMonthly = planMemberCount * MONTHLY_MEMBER_CONTRIBUTION_BDT;
 
   return (
     <>
@@ -514,28 +534,120 @@ function TargetProgressCard({ collected, target }: { collected: number; target: 
             <MiniStat label="Collected" value={formatBdt(collected)} />
             <MiniStat label="Target" value={formatBdt(target)} />
             <MiniStat label="Remaining" value={formatBdt(remaining)} />
+            <MiniStat label="Expected / month" value={formatBdt(expectedMonthly)} />
+            <MiniStat label="Plan" value={`${PROJECT_PLAN_MONTHS} months`} />
+            <MiniStat label="Members counted" value={String(planMemberCount)} />
           </div>
         </div>
       ) : (
         <EmptyState text="Set a project target to track progress." />
       )}
+      <ExpectedVsActualChart contributions={contributions} expectedMonthly={expectedMonthly} />
     </>
   );
 }
 
-function MemberOverview({ profile, project, contributions, projectCollections, totals, onNavigate }: {
+type ExpectedActualMonth = {
+  key: string;
+  label: string;
+  expected: number;
+  actual: number;
+};
+
+function ExpectedVsActualChart({ contributions, expectedMonthly }: {
+  contributions: Contribution[];
+  expectedMonthly: number;
+}) {
+  const months = useMemo(() => getExpectedVsActualWindow(contributions, expectedMonthly), [contributions, expectedMonthly]);
+  const maxValue = Math.max(...months.flatMap((item) => [item.expected, item.actual]), 1);
+  const width = 720;
+  const height = 220;
+  const padding = { top: 18, right: 18, bottom: 34, left: 46 };
+  const chartWidth = width - padding.left - padding.right;
+  const chartHeight = height - padding.top - padding.bottom;
+  const actualPoints = months.map((item, index) => {
+    const x = padding.left + (months.length === 1 ? chartWidth / 2 : (index / (months.length - 1)) * chartWidth);
+    const y = padding.top + chartHeight - (item.actual / maxValue) * chartHeight;
+    return { x, y, item };
+  });
+  const expectedPoints = months.map((item, index) => {
+    const x = padding.left + (months.length === 1 ? chartWidth / 2 : (index / (months.length - 1)) * chartWidth);
+    const y = padding.top + chartHeight - (item.expected / maxValue) * chartHeight;
+    return { x, y, item };
+  });
+  const actualPath = actualPoints.map((point, index) => `${index === 0 ? "M" : "L"} ${point.x} ${point.y}`).join(" ");
+  const expectedPath = expectedPoints.map((point, index) => `${index === 0 ? "M" : "L"} ${point.x} ${point.y}`).join(" ");
+  const areaPath = `${actualPath} L ${padding.left + chartWidth} ${padding.top + chartHeight} L ${padding.left} ${padding.top + chartHeight} Z`;
+  const actualTotal = months.reduce((sum, item) => sum + item.actual, 0);
+  const expectedTotal = months.reduce((sum, item) => sum + item.expected, 0);
+  const gap = actualTotal - expectedTotal;
+
+  return (
+    <div className="expected-chart-card">
+      <div className="expected-chart-head">
+        <div>
+          <h3>Expected vs real monthly deposit</h3>
+          <p>{months[0]?.label ?? ""} - {months[months.length - 1]?.label ?? ""}</p>
+        </div>
+        <div className="chart-legend">
+          <span><i className="legend-expected" /> Expected</span>
+          <span><i className="legend-actual" /> Real</span>
+        </div>
+      </div>
+      <div className="expected-chart-summary">
+        <MiniStat label="Expected in period" value={formatBdt(expectedTotal)} />
+        <MiniStat label="Real in period" value={formatBdt(actualTotal)} />
+        <MiniStat label={gap >= 0 ? "Ahead" : "Behind"} value={formatBdt(Math.abs(gap))} />
+      </div>
+      <div className="expected-chart-wrap">
+        <svg viewBox={`0 0 ${width} ${height}`} role="img" aria-label="Expected monthly deposit compared with real deposits">
+          <defs>
+            <linearGradient id="actualDepositFill" x1="0" x2="0" y1="0" y2="1">
+              <stop offset="0%" stopColor="#8fb4f2" stopOpacity="0.58" />
+              <stop offset="100%" stopColor="#8fb4f2" stopOpacity="0.06" />
+            </linearGradient>
+          </defs>
+          {[0, 0.5, 1].map((ratio) => {
+            const y = padding.top + chartHeight * ratio;
+            return <line key={ratio} x1={padding.left} x2={padding.left + chartWidth} y1={y} y2={y} className="chart-grid-line" />;
+          })}
+          <path d={areaPath} className="actual-area-path" />
+          <path d={expectedPath} className="expected-line-path" />
+          <path d={actualPath} className="actual-line-path" />
+          {actualPoints.map((point) => (
+            <circle key={point.item.key} cx={point.x} cy={point.y} r="4" className="actual-chart-dot">
+              <title>{`${point.item.label}: real ${formatBdt(point.item.actual)}, expected ${formatBdt(point.item.expected)}`}</title>
+            </circle>
+          ))}
+          {months.map((item, index) => {
+            const x = padding.left + (months.length === 1 ? chartWidth / 2 : (index / (months.length - 1)) * chartWidth);
+            return (
+              <text key={item.key} x={x} y={height - 9} textAnchor="middle" className="chart-axis-label">
+                {item.label}
+              </text>
+            );
+          })}
+          <text x="8" y={padding.top + 8} className="chart-axis-label">{compactBdt(maxValue)}</text>
+          <text x="8" y={padding.top + chartHeight + 4} className="chart-axis-label">0</text>
+        </svg>
+      </div>
+    </div>
+  );
+}
+
+function MemberOverview({ profile, project, contributions, projectCollections, projectMemberCount, totals, onNavigate }: {
   profile: Profile | null;
   project: InvestmentProject | null;
   contributions: Contribution[];
   projectCollections: Contribution[];
+  projectMemberCount: number;
   totals: ReturnType<typeof calculateTotals>;
   onNavigate: (section: MemberSection) => void;
 }) {
   const projectTotals = useMemo(() => calculateTotals(projectCollections), [projectCollections]);
-  const target = Number(project?.target_amount_bdt ?? 0);
-  const progress = target > 0 ? Math.min(100, (projectTotals.approved / target) * 100) : 0;
+  const target = getScaledProjectTarget(Number(project?.target_amount_bdt ?? 0), projectMemberCount);
+  const ownCoverage = getMonthlyPaymentCoverage(totals.approved, currentMonthKey());
   const recent = contributions.slice(0, 5);
-  const paidThisMonth = contributions.some((contribution) => contribution.status === "approved" && monthKey(contribution.payment_date) === currentMonthKey());
 
   return (
     <div className="finance-dashboard-grid">
@@ -589,7 +701,12 @@ function MemberOverview({ profile, project, contributions, projectCollections, t
       </section>
 
       <section className="panel finance-progress-card">
-        <TargetProgressCard collected={projectTotals.approved} target={target} />
+        <TargetProgressCard
+          collected={projectTotals.approved}
+          target={target}
+          contributions={projectCollections}
+          activeMemberCount={projectMemberCount}
+        />
       </section>
 
       <section className="panel finance-score-card">
@@ -600,7 +717,12 @@ function MemberOverview({ profile, project, contributions, projectCollections, t
           </div>
           <button className="secondary-button" type="button" onClick={() => onNavigate("status")}>Open</button>
         </div>
-        <ProgressGauge value={progress} label={paidThisMonth ? "Current" : "Needs payment"} />
+        <ProgressGauge value={ownCoverage.coveragePercent} label={ownCoverage.paid ? "Current" : "Needs payment"} />
+        <div className="insight-list compact-insights">
+          <InsightRow label="Monthly due" value={formatBdt(MONTHLY_MEMBER_CONTRIBUTION_BDT)} />
+          <InsightRow label="Paid through" value={ownCoverage.paidThroughMonth ? monthLabel(ownCoverage.paidThroughMonth) : "No full month"} />
+          <InsightRow label="Balance" value={coverageBalanceLabel(ownCoverage)} />
+        </div>
       </section>
     </div>
   );
@@ -608,6 +730,20 @@ function MemberOverview({ profile, project, contributions, projectCollections, t
 
 function currentMonthKey() {
   return new Date().toISOString().slice(0, 7);
+}
+
+function coverageBalanceLabel(coverage: ReturnType<typeof getMonthlyPaymentCoverage>) {
+  if (coverage.overdueMonths > 0) return `Due ${coverage.overdueMonths} month${coverage.overdueMonths === 1 ? "" : "s"}`;
+  if (coverage.advanceMonths > 0) return `Advance ${coverage.advanceMonths} month${coverage.advanceMonths === 1 ? "" : "s"}`;
+  if (coverage.creditBdt > 0) return `${formatBdt(coverage.creditBdt)} credit`;
+  return "Current";
+}
+
+function paymentStatusBalanceLabel(row: MemberPaymentStatus) {
+  if (row.overdueMonths > 0) return `Due ${row.overdueMonths} month${row.overdueMonths === 1 ? "" : "s"} / ${formatBdt(row.remainingDueBdt)}`;
+  if (row.advanceMonths > 0) return `Advance ${row.advanceMonths} month${row.advanceMonths === 1 ? "" : "s"}`;
+  if (row.creditBdt > 0) return `${formatBdt(row.creditBdt)} credit toward next month`;
+  return "Current";
 }
 
 function MemberPaymentStatusPanel({ project, onError }: {
@@ -644,6 +780,7 @@ function MemberPaymentStatusPanel({ project, onError }: {
 
   const paidCount = rows.filter((row) => row.paid).length;
   const unpaidCount = rows.length - paidCount;
+  const advanceCount = rows.filter((row) => row.advanceMonths > 0).length;
 
   return (
     <section className="panel">
@@ -654,7 +791,9 @@ function MemberPaymentStatusPanel({ project, onError }: {
         </div>
         <span className="count-badge">{monthLabel(month)}</span>
       </div>
-      <p className="helper-text">Select a month to see which project members have an approved payment.</p>
+      <p className="helper-text">
+        Every member owes {formatBdt(MONTHLY_MEMBER_CONTRIBUTION_BDT)} per month from {monthLabel(PROJECT_START_MONTH)}. Approved bulk payments clear old months first, then count as advance payment.
+      </p>
       <div className="filter-grid">
         <label>
           Month
@@ -664,6 +803,7 @@ function MemberPaymentStatusPanel({ project, onError }: {
       <div className="admin-metric-grid">
         <MetricCard icon={<CheckCircle2 />} label="Paid members" value={loading ? "Loading" : String(paidCount)} />
         <MetricCard icon={<Clock3 />} label="Not paid" value={loading ? "Loading" : String(unpaidCount)} />
+        <MetricCard icon={<TrendingUp />} label="Advance paid" value={loading ? "Loading" : String(advanceCount)} />
         <MetricCard icon={<Users />} label="Members shown" value={loading ? "Loading" : String(rows.length)} />
       </div>
 
@@ -678,6 +818,8 @@ function MemberPaymentStatusPanel({ project, onError }: {
               <tr>
                 <th>Member</th>
                 <th>Status</th>
+                <th>Paid through</th>
+                <th>Balance</th>
                 <th>Last paid</th>
               </tr>
             </thead>
@@ -693,6 +835,8 @@ function MemberPaymentStatusPanel({ project, onError }: {
                       {row.paid ? "Paid" : "Not paid"}
                     </span>
                   </td>
+                  <td data-label="Paid through">{row.paidThroughMonth ? monthLabel(row.paidThroughMonth) : "No full month"}</td>
+                  <td data-label="Balance">{paymentStatusBalanceLabel(row)}</td>
                   <td data-label="Last paid">{row.lastPaymentDate ? formatDate(row.lastPaymentDate) : "None"}</td>
                 </tr>
               ))}
@@ -1058,10 +1202,11 @@ function AdminPaymentForm({ project, members, onSubmitted, onError }: {
   );
 }
 
-function AdminDashboard({ project, contributions, projectCollections, reviewerId, currentUserId, onProjectSaved, onReviewed, onError }: {
+function AdminDashboard({ project, contributions, projectCollections, projectMemberCount, reviewerId, currentUserId, onProjectSaved, onReviewed, onError }: {
   project: InvestmentProject | null;
   contributions: Contribution[];
   projectCollections: Contribution[];
+  projectMemberCount: number;
   reviewerId: string;
   currentUserId: string;
   onProjectSaved: () => Promise<void>;
@@ -1175,6 +1320,7 @@ function AdminDashboard({ project, contributions, projectCollections, reviewerId
             contributions={contributions}
             projectCollections={projectCollections}
             members={members}
+            projectMemberCount={projectMemberCount}
             loadingMembers={loadingMembers}
             onNavigate={selectSection}
             onOpenReceipt={openContributionReceipt}
@@ -1198,6 +1344,10 @@ function AdminDashboard({ project, contributions, projectCollections, reviewerId
             }}
             onError={onError}
           />
+        )}
+
+        {activeSection === "status" && (
+          <MemberPaymentStatusPanel project={project} onError={onError} />
         )}
 
         {activeSection === "reports" && <AdminReportPanel contributions={contributions} onOpenReceipt={openContributionReceipt} />}
@@ -1230,17 +1380,19 @@ function navItemsConfig(pendingCount: number, memberCount: number): Array<{ id: 
     { id: "overview", label: "Overview", icon: <LayoutDashboard size={17} />, detail: "Fund health" },
     { id: "review", label: "Review", icon: <ShieldCheck size={17} />, detail: `${pendingCount} pending` },
     { id: "submit", label: "Submit", icon: <Upload size={17} />, detail: "For member" },
+    { id: "status", label: "Payment status", icon: <Users size={17} />, detail: "Dues ledger" },
     { id: "reports", label: "Reports", icon: <Filter size={17} />, detail: "Approved ledger" },
     { id: "members", label: "Members", icon: <Users size={17} />, detail: `${memberCount} users` },
     { id: "project", label: "Project", icon: <Settings size={17} />, detail: "Setup" },
   ];
 }
 
-function AdminOverview({ project, contributions, projectCollections, members, loadingMembers, onNavigate, onOpenReceipt }: {
+function AdminOverview({ project, contributions, projectCollections, members, projectMemberCount, loadingMembers, onNavigate, onOpenReceipt }: {
   project: InvestmentProject | null;
   contributions: Contribution[];
   projectCollections: Contribution[];
   members: MemberRecord[];
+  projectMemberCount: number;
   loadingMembers: boolean;
   onNavigate: (section: AdminSection) => void;
   onOpenReceipt: (contribution: Contribution) => Promise<void>;
@@ -1257,7 +1409,23 @@ function AdminOverview({ project, contributions, projectCollections, members, lo
   const pausedMembers = memberAccounts.filter((member) => getEffectiveMembershipStatus(member) === "paused").length;
   const needsSetupMembers = memberAccounts.filter((member) => !member.membership).length;
   const adminUsers = members.filter((member) => member.role === "admin").length;
-  const target = Number(project?.target_amount_bdt ?? 0);
+  const effectiveActiveMembers = activeMembers || projectMemberCount;
+  const baseTarget = Number(project?.target_amount_bdt ?? 0);
+  const target = getScaledProjectTarget(baseTarget, effectiveActiveMembers);
+  const approvedByMember = new Map<string, number>();
+
+  approved.forEach((contribution) => {
+    approvedByMember.set(
+      contribution.member_id,
+      (approvedByMember.get(contribution.member_id) ?? 0) + Number(contribution.bdt_amount),
+    );
+  });
+
+  const currentMemberCoverage = memberAccounts
+    .filter((member) => getEffectiveMembershipStatus(member) === "active")
+    .map((member) => getMonthlyPaymentCoverage(approvedByMember.get(member.id) ?? 0, currentMonthKey()));
+  const overdueMembers = currentMemberCoverage.filter((coverage) => !coverage.paid).length;
+  const advancePaidMembers = currentMemberCoverage.filter((coverage) => coverage.advanceMonths > 0).length;
   const recentApproved = approved
     .slice()
     .sort((a, b) => b.payment_date.localeCompare(a.payment_date))
@@ -1278,6 +1446,8 @@ function AdminOverview({ project, contributions, projectCollections, members, lo
         <div className="mini-card-row">
           <MiniStat label="Pending" value={`${pending.length} / ${formatBdt(pendingTotal)}`} />
           <MiniStat label="Active members" value={loadingMembers ? "Loading" : String(activeMembers)} />
+          <MiniStat label="Monthly rule" value={`${formatBdt(MONTHLY_MEMBER_CONTRIBUTION_BDT)} each`} />
+          <MiniStat label="Since" value={monthLabel(PROJECT_START_MONTH)} />
         </div>
       </section>
 
@@ -1317,7 +1487,12 @@ function AdminOverview({ project, contributions, projectCollections, members, lo
       </section>
 
       <section className="panel finance-progress-card">
-        <TargetProgressCard collected={approvedTotal} target={target} />
+        <TargetProgressCard
+          collected={approvedTotal}
+          target={target}
+          contributions={projectCollections}
+          activeMemberCount={effectiveActiveMembers}
+        />
       </section>
 
       <section className="panel finance-score-card">
@@ -1326,12 +1501,16 @@ function AdminOverview({ project, contributions, projectCollections, members, lo
             <span className="title-icon"><Users size={20} /></span>
             <h2>Membership health</h2>
           </div>
-          <button className="secondary-button" type="button" onClick={() => onNavigate("members")}>Manage</button>
+          <button className="secondary-button" type="button" onClick={() => onNavigate("status")}>Status</button>
         </div>
         <ProgressGauge value={memberAccounts.length ? (activeMembers / memberAccounts.length) * 100 : 0} label={`${activeMembers} active`} />
         <div className="insight-list compact-insights">
+          <InsightRow label="Overdue members" value={loadingMembers ? "Loading" : String(overdueMembers)} />
+          <InsightRow label="Advance paid" value={loadingMembers ? "Loading" : String(advancePaidMembers)} />
           <InsightRow label="Paused" value={loadingMembers ? "Loading" : String(pausedMembers)} />
           <InsightRow label="Needs setup" value={loadingMembers ? "Loading" : String(needsSetupMembers)} />
+          <InsightRow label="Base target" value={formatBdt(baseTarget)} />
+          <InsightRow label="Scaled target" value={formatBdt(target)} />
           <InsightRow label="Admins" value={loadingMembers ? "Loading" : String(adminUsers)} />
           <InsightRow label="Receipt coverage" value={approved.length ? `${Math.round((receiptBackedApproved / approved.length) * 100)}%` : "No records"} />
           <InsightRow label="Rejected records" value={String(rejected.length)} />
@@ -1522,6 +1701,31 @@ function getCollectionWindow(contributions: Contribution[], offsetMonths: number
   });
 }
 
+function getExpectedVsActualWindow(contributions: Contribution[], expectedMonthly: number): ExpectedActualMonth[] {
+  const totalsByMonth = new Map<string, number>();
+
+  contributions.forEach((contribution) => {
+    if (contribution.status !== "approved") return;
+    const key = monthKey(contribution.payment_date);
+    totalsByMonth.set(key, (totalsByMonth.get(key) ?? 0) + Number(contribution.bdt_amount));
+  });
+
+  const projectStart = new Date(`${PROJECT_START_MONTH}-01T00:00:00`);
+  const currentStart = startOfCurrentMonth();
+  const monthCountSinceStart = Math.max(1, (currentStart.getFullYear() - projectStart.getFullYear()) * 12 + currentStart.getMonth() - projectStart.getMonth() + 1);
+  const monthDates = Array.from({ length: monthCountSinceStart }, (_unused, index) => addMonths(projectStart, index));
+
+  return monthDates.map((date) => {
+    const key = monthKeyFromDate(date);
+    return {
+      key,
+      label: new Intl.DateTimeFormat("en", { month: "short", year: "2-digit" }).format(date),
+      expected: expectedMonthly,
+      actual: totalsByMonth.get(key) ?? 0,
+    };
+  });
+}
+
 function monthKey(value: string) {
   return value.slice(0, 7);
 }
@@ -1534,6 +1738,12 @@ function monthLabel(value: string) {
 
 function getContributionMemberName(contribution: Contribution) {
   return contribution.member?.full_name || contribution.member?.email || contribution.profiles?.full_name || contribution.profiles?.email || "Member";
+}
+
+function compactBdt(value: number) {
+  if (value >= 1000000) return `BDT ${(value / 1000000).toFixed(value % 1000000 === 0 ? 0 : 1)}M`;
+  if (value >= 1000) return `BDT ${Math.round(value / 1000)}k`;
+  return formatBdt(value);
 }
 
 function isContributionFromAdmin(contribution: Contribution) {
@@ -2108,7 +2318,7 @@ function ProjectSetupPanel({ project, onSaved, onError }: {
           <input value={name} onChange={(event) => setName(event.target.value)} required />
         </label>
         <label>
-          Target amount in BDT
+          Base target in BDT for 10 members
           <input
             type="number"
             min="0"

@@ -42,6 +42,14 @@ export type MemberPaymentStatus = {
   paid: boolean;
   approvedTotalBdt: number;
   paymentCount: number;
+  dueMonths: number;
+  paidMonths: number;
+  overdueMonths: number;
+  advanceMonths: number;
+  creditBdt: number;
+  remainingDueBdt: number;
+  coveragePercent: number;
+  paidThroughMonth: string | null;
   lastPaymentDate: string | null;
   lastPaymentMethod: string | null;
   receiptFileName: string | null;

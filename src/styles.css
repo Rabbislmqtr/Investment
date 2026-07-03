@@ -1061,6 +1061,129 @@ button:disabled {
   gap: 12px;
 }
 
+.expected-chart-card {
+  margin-top: 24px;
+  border: 1px solid rgba(255, 255, 255, 0.82);
+  border-radius: 8px;
+  background: rgba(255, 255, 255, 0.5);
+  padding: 16px;
+}
+
+.expected-chart-head {
+  display: flex;
+  justify-content: space-between;
+  gap: 16px;
+  align-items: flex-start;
+}
+
+.expected-chart-head h3,
+.expected-chart-head p {
+  margin: 0;
+}
+
+.expected-chart-head h3 {
+  color: #14211c;
+  font-size: 1rem;
+}
+
+.expected-chart-head p {
+  margin-top: 4px;
+  color: #63736b;
+  font-weight: 800;
+}
+
+.chart-legend {
+  display: inline-flex;
+  flex-wrap: wrap;
+  justify-content: flex-end;
+  gap: 10px;
+  color: #52635c;
+  font-size: 0.78rem;
+  font-weight: 800;
+}
+
+.chart-legend span {
+  display: inline-flex;
+  align-items: center;
+  gap: 6px;
+}
+
+.chart-legend i {
+  width: 22px;
+  height: 4px;
+  border-radius: 999px;
+  display: inline-block;
+}
+
+.legend-expected {
+  background: #26342f;
+}
+
+.legend-actual {
+  background: #8fb4f2;
+}
+
+.expected-chart-summary {
+  display: grid;
+  grid-template-columns: repeat(3, minmax(0, 1fr));
+  gap: 10px;
+  margin: 14px 0 10px;
+}
+
+.expected-chart-summary .mini-stat {
+  padding: 10px;
+}
+
+.expected-chart-wrap {
+  width: 100%;
+  overflow: hidden;
+}
+
+.expected-chart-wrap svg {
+  width: 100%;
+  min-height: 210px;
+  display: block;
+}
+
+.chart-grid-line {
+  stroke: rgba(82, 99, 92, 0.14);
+  stroke-width: 1;
+}
+
+.actual-area-path {
+  fill: url("#actualDepositFill");
+}
+
+.expected-line-path,
+.actual-line-path {
+  fill: none;
+  stroke-linecap: round;
+  stroke-linejoin: round;
+}
+
+.expected-line-path {
+  stroke: #26342f;
+  stroke-width: 4;
+  stroke-dasharray: 9 9;
+}
+
+.actual-line-path {
+  stroke: #7fa9ef;
+  stroke-width: 5;
+}
+
+.actual-chart-dot {
+  fill: #f8fbff;
+  stroke: #7fa9ef;
+  stroke-width: 4;
+}
+
+.chart-axis-label {
+  fill: #60716a;
+  font-size: 12px;
+  font-weight: 800;
+}
+
 .member-identity {
   display: flex;
   align-items: center;
@@ -2018,6 +2141,26 @@ th {
   .target-progress-layout,
   .target-progress-details {
     grid-template-columns: 1fr;
+  }
+
+  .expected-chart-head {
+    display: grid;
+  }
+
+  .chart-legend {
+    justify-content: flex-start;
+  }
+
+  .expected-chart-summary {
+    grid-template-columns: 1fr;
+  }
+
+  .expected-chart-wrap svg {
+    min-width: 620px;
+  }
+
+  .expected-chart-wrap {
+    overflow-x: auto;
   }
 
   .target-progress-ring {
