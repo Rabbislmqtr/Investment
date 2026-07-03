@@ -410,6 +410,43 @@ function memberNavItemsConfig(pendingCount: number, approvedCount: number): Arra
   ];
 }
 
+function TargetProgressCard({ collected, target }: { collected: number; target: number }) {
+  const progress = target > 0 ? Math.min(100, (collected / target) * 100) : 0;
+  const remaining = Math.max(0, target - collected);
+
+  return (
+    <>
+      <div className="panel-title split-title">
+        <div>
+          <span className="title-icon"><LayoutDashboard size={20} /></span>
+          <h2>Target progress</h2>
+        </div>
+        <span className="count-badge">{target > 0 ? `${Math.round(progress)}% funded` : "No target"}</span>
+      </div>
+      {target > 0 ? (
+        <div className="target-progress-layout" aria-label="Investment target progress">
+          <div
+            className="target-progress-ring"
+            style={{ background: `conic-gradient(#2f8060 0 ${progress}%, #e2ece7 ${progress}% 100%)` }}
+          >
+            <div>
+              <strong>{Math.round(progress)}%</strong>
+              <span>Funded</span>
+            </div>
+          </div>
+          <div className="target-progress-details">
+            <MiniStat label="Collected" value={formatBdt(collected)} />
+            <MiniStat label="Target" value={formatBdt(target)} />
+            <MiniStat label="Remaining" value={formatBdt(remaining)} />
+          </div>
+        </div>
+      ) : (
+        <EmptyState text="Set a project target to track progress." />
+      )}
+    </>
+  );
+}
+
 function MemberOverview({ profile, project, contributions, projectCollections, totals, onNavigate }: {
   profile: Profile | null;
   project: InvestmentProject | null;
@@ -1109,43 +1146,6 @@ function MiniStat({ label, value }: { label: string; value: string }) {
       <span>{label}</span>
       <strong>{value}</strong>
     </div>
-  );
-}
-
-function TargetProgressCard({ collected, target }: { collected: number; target: number }) {
-  const progress = target > 0 ? Math.min(100, (collected / target) * 100) : 0;
-  const remaining = Math.max(0, target - collected);
-
-  return (
-    <>
-      <div className="panel-title split-title">
-        <div>
-          <span className="title-icon"><LayoutDashboard size={20} /></span>
-          <h2>Target progress</h2>
-        </div>
-        <span className="count-badge">{target > 0 ? `${Math.round(progress)}% funded` : "No target"}</span>
-      </div>
-      {target > 0 ? (
-        <div className="target-progress-layout" aria-label="Investment target progress">
-          <div
-            className="target-progress-ring"
-            style={{ background: `conic-gradient(#2f8060 0 ${progress}%, #e2ece7 ${progress}% 100%)` }}
-          >
-            <div>
-              <strong>{Math.round(progress)}%</strong>
-              <span>Funded</span>
-            </div>
-          </div>
-          <div className="target-progress-details">
-            <MiniStat label="Collected" value={formatBdt(collected)} />
-            <MiniStat label="Target" value={formatBdt(target)} />
-            <MiniStat label="Remaining" value={formatBdt(remaining)} />
-          </div>
-        </div>
-      ) : (
-        <EmptyState text="Set a project target to track progress." />
-      )}
-    </>
   );
 }
 

@@ -1726,6 +1726,21 @@ th {
     min-width: 0;
   }
 
+  .fit-table {
+    table-layout: auto;
+  }
+
+  .recent-contributions-table th:nth-child(1),
+  .recent-contributions-table td:nth-child(1),
+  .recent-contributions-table th:nth-child(2),
+  .recent-contributions-table td:nth-child(2),
+  .recent-contributions-table th:nth-child(3),
+  .recent-contributions-table td:nth-child(3),
+  .recent-contributions-table th:nth-child(4),
+  .recent-contributions-table td:nth-child(4) {
+    width: 100%;
+  }
+
   thead {
     position: absolute;
     width: 1px;
@@ -1756,11 +1771,22 @@ th {
     overflow-wrap: anywhere;
   }
 
+  .recent-contributions-table td {
+    display: grid;
+    grid-template-columns: minmax(76px, 0.34fr) minmax(0, 1fr);
+    align-items: start;
+    text-align: left;
+  }
+
   td::before {
     content: attr(data-label);
     color: #65766e;
     font-weight: 800;
     text-align: left;
     flex: 0 0 auto;
+  }
+
+  .recent-contributions-table td::before {
+    min-width: 0;
   }
 }
