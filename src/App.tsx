@@ -1,4 +1,4 @@
-import { useEffect, useId, useMemo, useState } from "react";
+import { useEffect, useMemo, useState } from "react";
 import type React from "react";
 import type { Session } from "@supabase/supabase-js";
 import {
@@ -29,9 +29,7 @@ import {
 } from "lucide-react";
 import type { Contribution, InvestmentProject, MemberPaymentStatus, MemberRecord, MembershipStatus, Profile, ProfileRole } from "./types";
 import {
-  BASE_TARGET_MEMBER_COUNT,
   MONTHLY_MEMBER_CONTRIBUTION_BDT,
-  PROJECT_PLAN_MONTHS,
   PROJECT_START_MONTH,
   calculateTotals,
   createAdminMember,
@@ -512,16 +510,9 @@ function memberNavItemsConfig(pendingCount: number, approvedCount: number): Arra
   ];
 }
 
-function TargetProgressCard({ collected, target, contributions, activeMemberCount }: {
-  collected: number;
-  target: number;
-  contributions: Contribution[];
-  activeMemberCount: number;
-}) {
+function TargetProgressCard({ collected, target }: { collected: number; target: number }) {
   const progress = target > 0 ? Math.min(100, (collected / target) * 100) : 0;
   const remaining = Math.max(0, target - collected);
-  const planMemberCount = Math.max(BASE_TARGET_MEMBER_COUNT, activeMemberCount);
-  const expectedMonthly = planMemberCount * MONTHLY_MEMBER_CONTRIBUTION_BDT;
 
   return (
     <>
@@ -547,136 +538,12 @@ function TargetProgressCard({ collected, target, contributions, activeMemberCoun
             <MiniStat label="Collected" value={formatBdt(collected)} />
             <MiniStat label="Target" value={formatBdt(target)} />
             <MiniStat label="Remaining" value={formatBdt(remaining)} />
-            <MiniStat label="Expected / month" value={formatBdt(expectedMonthly)} />
-            <MiniStat label="Plan" value={`${PROJECT_PLAN_MONTHS} months`} />
-            <MiniStat label="Members counted" value={String(planMemberCount)} />
           </div>
         </div>
       ) : (
         <EmptyState text="Set a project target to track progress." />
       )}
-      <ExpectedVsActualChart contributions={contributions} expectedMonthly={expectedMonthly} />
     </>
-  );
-}
-
-type ExpectedActualMonth = {
-  key: string;
-  label: string;
-  expected: number;
-  actual: number;
-};
-
-function ExpectedVsActualChart({ contributions, expectedMonthly }: {
-  contributions: Contribution[];
-  expectedMonthly: number;
-}) {
-  const months = useMemo(() => getExpectedVsActualWindow(contributions, expectedMonthly), [contributions, expectedMonthly]);
-  const recentMonths = months.slice(-6);
-  const actualTotal = months.reduce((sum, item) => sum + item.actual, 0);
-  const expectedTotal = months.reduce((sum, item) => sum + item.expected, 0);
-  const gap = actualTotal - expectedTotal;
-  const latest = months[months.length - 1];
-  const latestGap = latest ? latest.actual - latest.expected : 0;
-
-  return (
-    <div className="expected-chart-card">
-      <div className="expected-chart-head">
-        <div>
-          <h3>Expected vs real monthly deposit</h3>
-          <p>{months[0]?.label ?? ""} - {months[months.length - 1]?.label ?? ""}</p>
-        </div>
-        <div className="chart-legend">
-          <span><i className="legend-expected" /> Expected</span>
-          <span><i className="legend-actual" /> Real</span>
-        </div>
-      </div>
-      <div className="expected-chart-summary">
-        <MiniStat label="Expected in period" value={formatBdt(expectedTotal)} />
-        <MiniStat label="Real in period" value={formatBdt(actualTotal)} />
-        <MiniStat label={gap >= 0 ? "Ahead" : "Behind"} value={formatBdt(Math.abs(gap))} />
-        <MiniStat label="Latest month" value={latest ? `${latest.actual >= latest.expected ? "Met" : "Short"} ${formatBdt(Math.abs(latestGap))}` : "No data"} />
-      </div>
-      <ExpectedActualLineChart
-        months={months}
-        className="expected-chart-full"
-        labelLimit={8}
-        ariaLabel="Full expected monthly deposit compared with real deposits"
-      />
-      <ExpectedActualLineChart
-        months={recentMonths}
-        className="expected-chart-compact"
-        labelLimit={6}
-        ariaLabel="Recent expected monthly deposit compared with real deposits"
-      />
-    </div>
-  );
-}
-
-function ExpectedActualLineChart({ months, className, labelLimit, ariaLabel }: {
-  months: ExpectedActualMonth[];
-  className: string;
-  labelLimit: number;
-  ariaLabel: string;
-}) {
-  const rawId = useId();
-  const gradientId = `actualDepositFill-${rawId.replace(/[^a-zA-Z0-9_-]/g, "")}`;
-  const maxValue = Math.max(...months.flatMap((item) => [item.expected, item.actual]), 1);
-  const width = 720;
-  const height = 220;
-  const padding = { top: 18, right: 18, bottom: 34, left: 46 };
-  const chartWidth = width - padding.left - padding.right;
-  const chartHeight = height - padding.top - padding.bottom;
-  const actualPoints = months.map((item, index) => {
-    const x = padding.left + (months.length === 1 ? chartWidth / 2 : (index / (months.length - 1)) * chartWidth);
-    const y = padding.top + chartHeight - (item.actual / maxValue) * chartHeight;
-    return { x, y, item };
-  });
-  const expectedPoints = months.map((item, index) => {
-    const x = padding.left + (months.length === 1 ? chartWidth / 2 : (index / (months.length - 1)) * chartWidth);
-    const y = padding.top + chartHeight - (item.expected / maxValue) * chartHeight;
-    return { x, y, item };
-  });
-  const actualPath = actualPoints.map((point, index) => `${index === 0 ? "M" : "L"} ${point.x} ${point.y}`).join(" ");
-  const expectedPath = expectedPoints.map((point, index) => `${index === 0 ? "M" : "L"} ${point.x} ${point.y}`).join(" ");
-  const areaPath = `${actualPath} L ${padding.left + chartWidth} ${padding.top + chartHeight} L ${padding.left} ${padding.top + chartHeight} Z`;
-  const labelStep = Math.max(1, Math.ceil(months.length / labelLimit));
-
-  return (
-    <div className={`expected-chart-wrap ${className}`}>
-      <svg viewBox={`0 0 ${width} ${height}`} role="img" aria-label={ariaLabel}>
-        <defs>
-          <linearGradient id={gradientId} x1="0" x2="0" y1="0" y2="1">
-            <stop offset="0%" stopColor="#8fb4f2" stopOpacity="0.58" />
-            <stop offset="100%" stopColor="#8fb4f2" stopOpacity="0.06" />
-          </linearGradient>
-        </defs>
-        {[0, 0.5, 1].map((ratio) => {
-          const y = padding.top + chartHeight * ratio;
-          return <line key={ratio} x1={padding.left} x2={padding.left + chartWidth} y1={y} y2={y} className="chart-grid-line" />;
-        })}
-        <path d={areaPath} className="actual-area-path" style={{ fill: `url(#${gradientId})` }} />
-        <path d={expectedPath} className="expected-line-path" />
-        <path d={actualPath} className="actual-line-path" />
-        {actualPoints.map((point) => (
-          <circle key={point.item.key} cx={point.x} cy={point.y} r="4" className="actual-chart-dot">
-            <title>{`${point.item.label}: real ${formatBdt(point.item.actual)}, expected ${formatBdt(point.item.expected)}`}</title>
-          </circle>
-        ))}
-        {months.map((item, index) => {
-          const shouldShowLabel = index === 0 || index === months.length - 1 || index % labelStep === 0;
-          if (!shouldShowLabel) return null;
-          const x = padding.left + (months.length === 1 ? chartWidth / 2 : (index / (months.length - 1)) * chartWidth);
-          return (
-            <text key={item.key} x={x} y={height - 9} textAnchor="middle" className="chart-axis-label">
-              {item.label}
-            </text>
-          );
-        })}
-        <text x="8" y={padding.top + 8} className="chart-axis-label">{compactBdt(maxValue)}</text>
-        <text x="8" y={padding.top + chartHeight + 4} className="chart-axis-label">0</text>
-      </svg>
-    </div>
   );
 }
 
@@ -746,12 +613,7 @@ function MemberOverview({ profile, project, contributions, projectCollections, p
       </section>
 
       <section className="panel finance-progress-card">
-        <TargetProgressCard
-          collected={projectTotals.approved}
-          target={target}
-          contributions={projectCollections}
-          activeMemberCount={projectMemberCount}
-        />
+        <TargetProgressCard collected={projectTotals.approved} target={target} />
       </section>
 
       <section className="panel finance-score-card">
@@ -1543,12 +1405,7 @@ function AdminOverview({ project, contributions, projectCollections, members, pr
       </section>
 
       <section className="panel finance-progress-card">
-        <TargetProgressCard
-          collected={approvedTotal}
-          target={target}
-          contributions={projectCollections}
-          activeMemberCount={effectiveActiveMembers}
-        />
+        <TargetProgressCard collected={approvedTotal} target={target} />
       </section>
 
       <section className="panel finance-score-card">
@@ -1757,31 +1614,6 @@ function getCollectionWindow(contributions: Contribution[], offsetMonths: number
   });
 }
 
-function getExpectedVsActualWindow(contributions: Contribution[], expectedMonthly: number): ExpectedActualMonth[] {
-  const totalsByMonth = new Map<string, number>();
-
-  contributions.forEach((contribution) => {
-    if (contribution.status !== "approved") return;
-    const key = monthKey(contribution.payment_date);
-    totalsByMonth.set(key, (totalsByMonth.get(key) ?? 0) + Number(contribution.bdt_amount));
-  });
-
-  const projectStart = new Date(`${PROJECT_START_MONTH}-01T00:00:00`);
-  const currentStart = startOfCurrentMonth();
-  const monthCountSinceStart = Math.max(1, (currentStart.getFullYear() - projectStart.getFullYear()) * 12 + currentStart.getMonth() - projectStart.getMonth() + 1);
-  const monthDates = Array.from({ length: monthCountSinceStart }, (_unused, index) => addMonths(projectStart, index));
-
-  return monthDates.map((date) => {
-    const key = monthKeyFromDate(date);
-    return {
-      key,
-      label: new Intl.DateTimeFormat("en", { month: "short", year: "2-digit" }).format(date),
-      expected: expectedMonthly,
-      actual: totalsByMonth.get(key) ?? 0,
-    };
-  });
-}
-
 function monthKey(value: string) {
   return value.slice(0, 7);
 }
@@ -1794,12 +1626,6 @@ function monthLabel(value: string) {
 
 function getContributionMemberName(contribution: Contribution) {
   return contribution.member?.full_name || contribution.member?.email || contribution.profiles?.full_name || contribution.profiles?.email || "Member";
-}
-
-function compactBdt(value: number) {
-  if (value >= 1000000) return `BDT ${(value / 1000000).toFixed(value % 1000000 === 0 ? 0 : 1)}M`;
-  if (value >= 1000) return `BDT ${Math.round(value / 1000)}k`;
-  return formatBdt(value);
 }
 
 function isContributionFromAdmin(contribution: Contribution) {

@@ -15,7 +15,6 @@ const RECEIPT_BUCKET = "payment-receipts";
 export const PROJECT_START_MONTH = "2026-01";
 export const MONTHLY_MEMBER_CONTRIBUTION_BDT = 10000;
 export const BASE_TARGET_MEMBER_COUNT = 10;
-export const PROJECT_PLAN_MONTHS = 36;
 
 function monthSerial(month: string) {
   const [year, monthNumber] = month.slice(0, 7).split("-").map(Number);
@@ -29,11 +28,10 @@ function monthFromSerial(serial: number) {
 }
 
 export function getScaledProjectTarget(baseTargetBdt: number, activeMemberCount: number) {
-  const planMemberCount = Math.max(BASE_TARGET_MEMBER_COUNT, activeMemberCount);
-  const ruleBasedTarget = planMemberCount * MONTHLY_MEMBER_CONTRIBUTION_BDT * PROJECT_PLAN_MONTHS;
-  if (baseTargetBdt <= 0) return ruleBasedTarget;
+  if (baseTargetBdt <= 0) return 0;
+  if (activeMemberCount <= BASE_TARGET_MEMBER_COUNT) return baseTargetBdt;
   const baseTargetPerMember = baseTargetBdt / BASE_TARGET_MEMBER_COUNT;
-  return Math.round(Math.max(ruleBasedTarget, baseTargetPerMember * planMemberCount));
+  return Math.round(baseTargetPerMember * activeMemberCount);
 }
 
 export function getMonthlyPaymentCoverage(totalApprovedBdt: number, selectedMonth: string) {
