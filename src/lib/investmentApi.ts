@@ -5,13 +5,13 @@ import type {
   MemberPaymentStatus,
   MemberRecord,
   MembershipStatus,
-  PaymentReceipt,
   Profile,
   ProfileRole,
 } from "../types";
 import { supabase } from "./supabase";
 
 const RECEIPT_BUCKET = "payment-receipts";
+export const MAX_RECEIPT_BYTES = 10 * 1024 * 1024;
 export const PROJECT_START_MONTH = "2026-01";
 export const MONTHLY_MEMBER_CONTRIBUTION_BDT = 10000;
 export const BASE_TARGET_MEMBER_COUNT = 10;
@@ -163,56 +163,29 @@ export async function updateMemberRecord(input: {
   joinedAt: string;
   status: MembershipStatus;
 }) {
-  const { error: profileError } = await supabase
-    .from("profiles")
-    .update({
-      full_name: input.fullName,
-      phone: input.phone,
-      resident_country: input.residentCountry,
-      role: input.role,
-    })
-    .eq("id", input.userId)
-    .select("id")
-    .single();
+  const { error } = await supabase.rpc("admin_update_member_record", {
+    p_project_id: input.projectId,
+    p_user_id: input.userId,
+    p_full_name: input.fullName,
+    p_phone: input.phone,
+    p_resident_country: input.residentCountry,
+    p_role: input.role,
+    p_member_code: input.memberCode,
+    p_joined_at: input.joinedAt,
+    p_status: input.status,
+  });
 
-  if (profileError) throw profileError;
-
-  if (input.role === "admin") {
-    const { error: membershipDeleteError } = await supabase
-      .from("group_members")
-      .delete()
-      .eq("project_id", input.projectId)
-      .eq("user_id", input.userId);
-
-    if (membershipDeleteError) throw membershipDeleteError;
-    return;
-  }
-
-  const { error: membershipError } = await supabase
-    .from("group_members")
-    .upsert(
-      {
-        project_id: input.projectId,
-        user_id: input.userId,
-        member_code: input.memberCode,
-        joined_at: input.joinedAt,
-        status: input.status,
-      },
-      { onConflict: "project_id,user_id" },
-    )
-    .select("id")
-    .single();
-
-  if (membershipError) throw membershipError;
+  if (error) throw error;
 }
 
-export async function getMemberContributions(memberId: string): Promise<Contribution[]> {
+export async function getMemberContributions(memberId: string, projectId: string): Promise<Contribution[]> {
   const { data, error } = await supabase
     .from("contributions")
     .select(
       "*, payment_receipts(id, contribution_id, uploaded_by, storage_bucket, storage_path, file_name, file_type, file_size, created_at)",
     )
     .eq("member_id", memberId)
+    .eq("project_id", projectId)
     .order("payment_date", { ascending: false });
 
   if (error) throw error;
@@ -262,15 +235,12 @@ export async function getMemberPaymentStatus(
         .eq("project_id", projectId)
         .eq("status", "approved");
 
-  const [{ data: profiles, error: profilesError }, contributionResult] = await Promise.all([
-    supabase
-      .from("profiles")
-      .select("id, full_name, email, phone, resident_country, role")
-      .in("id", memberIds),
+  const [{ data: directory, error: directoryError }, contributionResult] = await Promise.all([
+    supabase.rpc("get_project_member_directory", { target_project_id: projectId }),
     contributionQuery,
   ]);
 
-  if (profilesError) throw profilesError;
+  if (directoryError) throw directoryError;
   if (contributionResult.error) throw contributionResult.error;
 
   type StatusContribution = {
@@ -282,7 +252,9 @@ export async function getMemberPaymentStatus(
     payment_receipts?: Array<{ file_name: string | null; storage_path: string | null }> | null;
   };
 
-  const profileById = new Map((profiles ?? []).map((profile) => [profile.id, profile]));
+  type MemberDirectoryRow = { id: string; full_name: string };
+  const directoryRows = (directory ?? []) as MemberDirectoryRow[];
+  const profileById = new Map(directoryRows.map((profile) => [profile.id, profile]));
   const contributionsByMember = new Map<string, StatusContribution[]>();
   const statusContributions = (contributionResult.data ?? []) as unknown as StatusContribution[];
 
@@ -306,8 +278,8 @@ export async function getMemberPaymentStatus(
 
       return {
         memberId: membership.user_id,
-        memberName: profile?.full_name || profile?.email || "Member",
-        email: profile?.email ?? null,
+        memberName: profile?.full_name || "Member",
+        email: null,
         memberCode: membership.member_code,
         membershipStatus: membership.status,
         paid: coverage.paid,
@@ -333,12 +305,13 @@ export async function getMemberPaymentStatus(
     });
 }
 
-export async function getAdminContributions(): Promise<Contribution[]> {
+export async function getAdminContributions(projectId: string): Promise<Contribution[]> {
   const { data, error } = await supabase
     .from("contributions")
     .select(
       "*, member:profiles!contributions_member_id_fkey(full_name, email, role), payment_receipts(id, contribution_id, uploaded_by, storage_bucket, storage_path, file_name, file_type, file_size, created_at)",
     )
+    .eq("project_id", projectId)
     .order("created_at", { ascending: false });
 
   if (error) throw error;
@@ -364,6 +337,9 @@ export async function submitContribution(input: {
   notes?: string;
   receipt: File;
 }) {
+  if (input.receipt.size > MAX_RECEIPT_BYTES) {
+    throw new Error("Receipt must be 10 MB or smaller.");
+  }
   const ext = input.receipt.name.split(".").pop()?.toLowerCase() ?? "file";
   const filePath = `${input.memberId}/${crypto.randomUUID()}.${ext}`;
 
@@ -374,38 +350,27 @@ export async function submitContribution(input: {
 
   if (uploadError) throw uploadError;
 
-  const { data: contribution, error: contributionError } = await supabase
-    .from("contributions")
-    .insert({
-      project_id: input.projectId,
-      member_id: input.memberId,
-      payment_date: input.paymentDate,
-      bdt_amount: input.bdtAmount,
-      source_currency: input.sourceCurrency || null,
-      source_amount: input.sourceAmount || null,
-      exchange_rate: input.exchangeRate || null,
-      sent_from_country: input.sentFromCountry || null,
-      payment_method: input.paymentMethod || null,
-      notes: input.notes || null,
-      status: "pending",
-    })
-    .select("id")
-    .single();
+  const { error: contributionError } = await supabase.rpc("create_pending_contribution_with_receipt", {
+    p_project_id: input.projectId,
+    p_payment_date: input.paymentDate,
+    p_bdt_amount: input.bdtAmount,
+    p_source_currency: input.sourceCurrency || null,
+    p_source_amount: input.sourceAmount ?? null,
+    p_exchange_rate: input.exchangeRate ?? null,
+    p_sent_from_country: input.sentFromCountry || null,
+    p_payment_method: input.paymentMethod || null,
+    p_notes: input.notes || null,
+    p_storage_bucket: RECEIPT_BUCKET,
+    p_storage_path: filePath,
+    p_file_name: input.receipt.name,
+    p_file_type: input.receipt.type,
+    p_file_size: input.receipt.size,
+  });
 
-  if (contributionError) throw contributionError;
-
-  const receipt: Omit<PaymentReceipt, "id" | "created_at"> = {
-    contribution_id: contribution.id,
-    uploaded_by: input.memberId,
-    storage_bucket: RECEIPT_BUCKET,
-    storage_path: filePath,
-    file_name: input.receipt.name,
-    file_type: input.receipt.type,
-    file_size: input.receipt.size,
-  };
-
-  const { error: receiptError } = await supabase.from("payment_receipts").insert(receipt);
-  if (receiptError) throw receiptError;
+  if (contributionError) {
+    if (contributionError.code) await supabase.storage.from(RECEIPT_BUCKET).remove([filePath]);
+    throw contributionError;
+  }
 }
 
 async function getAdminSessionToken() {
@@ -435,18 +400,6 @@ async function postAdminFunction<T>(path: string, body: unknown): Promise<T> {
   return result as T;
 }
 
-async function fileToBase64(file: File) {
-  return new Promise<string>((resolve, reject) => {
-    const reader = new FileReader();
-    reader.onload = () => {
-      const result = typeof reader.result === "string" ? reader.result : "";
-      resolve(result.includes(",") ? result.split(",")[1] : result);
-    };
-    reader.onerror = () => reject(reader.error ?? new Error("Could not read receipt file."));
-    reader.readAsDataURL(file);
-  });
-}
-
 export async function createAdminMember(input: {
   projectId: string;
   fullName: string;
@@ -474,42 +427,40 @@ export async function submitAdminApprovedContribution(input: {
   notes?: string;
   receipt: File;
 }) {
-  const fileBase64 = await fileToBase64(input.receipt);
+  if (input.receipt.size > MAX_RECEIPT_BYTES) {
+    throw new Error("Receipt must be 10 MB or smaller.");
+  }
+  const extension = input.receipt.name.split(".").pop()?.toLowerCase() || "file";
+  const storagePath = `${input.memberId}/${crypto.randomUUID()}.${extension}`;
+  const { error: uploadError } = await supabase.storage.from(RECEIPT_BUCKET).upload(storagePath, input.receipt, {
+    contentType: input.receipt.type,
+    cacheControl: "3600",
+    upsert: false,
+  });
+  if (uploadError) throw uploadError;
+
   return postAdminFunction<{ contributionId: string }>("/.netlify/functions/admin-submit-member-payment", {
     ...input,
     receipt: undefined,
+    storagePath,
+    fileSize: input.receipt.size,
     fileName: input.receipt.name,
     fileType: input.receipt.type,
-    fileBase64,
   });
 }
 
 export async function reviewContribution(input: {
   contributionId: string;
-  reviewerId: string;
-  projectId: string;
   status: "approved" | "rejected";
   rejectionReason?: string;
 }) {
-  const { error } = await supabase
-    .from("contributions")
-    .update({
-      status: input.status,
-      reviewed_by: input.reviewerId,
-      reviewed_at: new Date().toISOString(),
-      rejection_reason: input.status === "rejected" ? input.rejectionReason || "Not approved" : null,
-    })
-    .eq("id", input.contributionId);
+  const { error } = await supabase.rpc("review_contribution", {
+    p_contribution_id: input.contributionId,
+    p_status: input.status,
+    p_rejection_reason: input.rejectionReason ?? null,
+  });
 
   if (error) throw error;
-
-  await supabase.from("audit_logs").insert({
-    actor_id: input.reviewerId,
-    project_id: input.projectId,
-    contribution_id: input.contributionId,
-    action: `contribution_${input.status}`,
-    details: { rejectionReason: input.rejectionReason || null },
-  });
 }
 
 export function calculateTotals(contributions: Contribution[]): DashboardTotals {

@@ -1,4 +1,4 @@
-import { cleanString, jsonResponse, readJson, RECEIPT_BUCKET, requireAdmin } from "./_shared/admin-utils.mjs";
+import { cleanString, jsonResponse, readJson, RECEIPT_BUCKET, requireAdmin, serverError } from "./_shared/admin-utils.mjs";
 
 const ALLOWED_RECEIPT_TYPES = new Set(["application/pdf", "image/jpeg", "image/png", "image/jpg"]);
 const MAX_RECEIPT_BYTES = 10 * 1024 * 1024;
@@ -21,7 +21,8 @@ export default async (request) => {
     const bdtAmount = Number(body.bdtAmount);
     const fileName = cleanString(body.fileName);
     const fileType = cleanString(body.fileType);
-    const fileBase64 = cleanString(body.fileBase64);
+    const storagePath = cleanString(body.storagePath);
+    const fileSize = Number(body.fileSize);
     const sourceCurrency = cleanString(body.sourceCurrency) || null;
     const sourceAmount = body.sourceAmount ? Number(body.sourceAmount) : null;
     const exchangeRate = body.exchangeRate ? Number(body.exchangeRate) : null;
@@ -33,12 +34,13 @@ export default async (request) => {
     if (!memberId) return jsonResponse({ error: "Member is required." }, 400);
     if (!paymentDate) return jsonResponse({ error: "Payment date is required." }, 400);
     if (!Number.isFinite(bdtAmount) || bdtAmount <= 0) return jsonResponse({ error: "BDT amount must be greater than zero." }, 400);
-    if (!fileName || !fileBase64) return jsonResponse({ error: "Receipt file is required." }, 400);
+    if (!fileName || !storagePath) return jsonResponse({ error: "Receipt file is required." }, 400);
     if (!ALLOWED_RECEIPT_TYPES.has(fileType)) return jsonResponse({ error: "Receipt must be PDF, JPG, or PNG." }, 400);
-
-    const fileBuffer = Buffer.from(fileBase64, "base64");
-    if (fileBuffer.byteLength > MAX_RECEIPT_BYTES) {
+    if (!Number.isFinite(fileSize) || fileSize <= 0 || fileSize > MAX_RECEIPT_BYTES) {
       return jsonResponse({ error: "Receipt must be 10 MB or smaller." }, 400);
+    }
+    if (!storagePath.startsWith(`${memberId}/`) || storagePath.includes("..")) {
+      return jsonResponse({ error: "Receipt path does not match the selected member." }, 400);
     }
 
     const { service } = auth;
@@ -53,59 +55,43 @@ export default async (request) => {
     if (membershipError) throw membershipError;
     if (!membership) return jsonResponse({ error: "Selected member is not active in this project." }, 400);
 
-    const extension = fileName.split(".").pop()?.toLowerCase() || "file";
-    const filePath = `${memberId}/${crypto.randomUUID()}.${extension}`;
-
-    const { error: uploadError } = await service.storage.from(RECEIPT_BUCKET).upload(filePath, fileBuffer, {
-      contentType: fileType,
-      cacheControl: "3600",
-      upsert: false,
+    const objectName = storagePath.slice(memberId.length + 1);
+    const { data: objects, error: objectError } = await service.storage.from(RECEIPT_BUCKET).list(memberId, {
+      search: objectName,
+      limit: 10,
     });
-    if (uploadError) throw uploadError;
+    if (objectError) throw objectError;
+    const storedObject = objects?.find((object) => object.name === objectName);
+    if (!storedObject) return jsonResponse({ error: "Uploaded receipt could not be verified." }, 400);
 
-    const reviewedAt = new Date().toISOString();
-    const { data: contribution, error: contributionError } = await service
-      .from("contributions")
-      .insert({
-        project_id: projectId,
-        member_id: memberId,
-        payment_date: paymentDate,
-        bdt_amount: bdtAmount,
-        source_currency: sourceCurrency,
-        source_amount: sourceAmount,
-        exchange_rate: exchangeRate,
-        sent_from_country: sentFromCountry,
-        payment_method: paymentMethod,
-        notes,
-        status: "approved",
-        reviewed_by: auth.adminUser.id,
-        reviewed_at: reviewedAt,
-      })
-      .select("id")
-      .single();
-    if (contributionError) throw contributionError;
+    const { data: contributionId, error: contributionError } = await service.rpc(
+      "create_admin_approved_contribution_with_receipt",
+      {
+        p_actor_id: auth.adminUser.id,
+        p_project_id: projectId,
+        p_member_id: memberId,
+        p_payment_date: paymentDate,
+        p_bdt_amount: bdtAmount,
+        p_source_currency: sourceCurrency,
+        p_source_amount: sourceAmount,
+        p_exchange_rate: exchangeRate,
+        p_sent_from_country: sentFromCountry,
+        p_payment_method: paymentMethod,
+        p_notes: notes,
+        p_storage_bucket: RECEIPT_BUCKET,
+        p_storage_path: storagePath,
+        p_file_name: fileName,
+        p_file_type: fileType,
+        p_file_size: fileSize,
+      },
+    );
+    if (contributionError) {
+      await service.storage.from(RECEIPT_BUCKET).remove([storagePath]);
+      throw contributionError;
+    }
 
-    const { error: receiptError } = await service.from("payment_receipts").insert({
-      contribution_id: contribution.id,
-      uploaded_by: memberId,
-      storage_bucket: RECEIPT_BUCKET,
-      storage_path: filePath,
-      file_name: fileName,
-      file_type: fileType,
-      file_size: fileBuffer.byteLength,
-    });
-    if (receiptError) throw receiptError;
-
-    await service.from("audit_logs").insert({
-      actor_id: auth.adminUser.id,
-      project_id: projectId,
-      contribution_id: contribution.id,
-      action: "admin_member_payment_approved",
-      details: { memberId, fileName },
-    });
-
-    return jsonResponse({ contributionId: contribution.id });
+    return jsonResponse({ contributionId });
   } catch (error) {
-    return jsonResponse({ error: error instanceof Error ? error.message : "Could not submit member payment." }, 500);
+    return serverError(error, "Could not submit member payment.");
   }
 };

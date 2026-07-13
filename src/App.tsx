@@ -30,6 +30,7 @@ import {
 import type { Contribution, InvestmentProject, MemberPaymentStatus, MemberRecord, MembershipStatus, Profile, ProfileRole } from "./types";
 import {
   MONTHLY_MEMBER_CONTRIBUTION_BDT,
+  MAX_RECEIPT_BYTES,
   PROJECT_START_MONTH,
   calculateTotals,
   createAdminMember,
@@ -97,9 +98,14 @@ function joinPhoneNumber(code: string, number: string) {
   return cleanNumber ? `${code}${cleanNumber}` : null;
 }
 
+function localDateKey(date = new Date()) {
+  return `${date.getFullYear()}-${String(date.getMonth() + 1).padStart(2, "0")}-${String(date.getDate()).padStart(2, "0")}`;
+}
+
 function App() {
   const [session, setSession] = useState<Session | null>(null);
   const [loadingSession, setLoadingSession] = useState(true);
+  const [recoveringPassword, setRecoveringPassword] = useState(false);
 
   useEffect(() => {
     supabase.auth.getSession().then(({ data }) => {
@@ -107,8 +113,9 @@ function App() {
       setLoadingSession(false);
     });
 
-    const { data } = supabase.auth.onAuthStateChange((_event, nextSession) => {
+    const { data } = supabase.auth.onAuthStateChange((event, nextSession) => {
       setSession(nextSession);
+      if (event === "PASSWORD_RECOVERY") setRecoveringPassword(true);
       setLoadingSession(false);
     });
 
@@ -117,6 +124,7 @@ function App() {
 
   if (!hasSupabaseConfig) return <SetupNotice />;
   if (loadingSession) return <PageShell><StatusMessage title="Opening your dashboard" body="Checking your login session." /></PageShell>;
+  if (recoveringPassword && session) return <PasswordRecoveryScreen onDone={() => setRecoveringPassword(false)} />;
   if (!session) return <AuthScreen />;
 
   return <InvestmentApp session={session} />;
@@ -161,11 +169,11 @@ function InvestmentApp({ session }: { session: Session }) {
       let collectionData: Contribution[] = [];
 
       if (effectiveMode === "admin") {
-        contributionData = await getAdminContributions();
+        contributionData = projectData ? await getAdminContributions(projectData.id) : [];
         collectionData = contributionData.filter((contribution) => contribution.status === "approved" && !isContributionFromAdmin(contribution));
       } else {
         const [memberContributionData, projectCollectionData] = await Promise.all([
-          getMemberContributions(session.user.id),
+          projectData ? getMemberContributions(session.user.id, projectData.id) : Promise.resolve([]),
           projectData ? getProjectApprovedContributions(projectData.id) : Promise.resolve([]),
         ]);
         contributionData = memberContributionData;
@@ -218,7 +226,6 @@ function InvestmentApp({ session }: { session: Session }) {
           contributions={contributions}
           projectCollections={projectCollections}
           projectMemberCount={projectMemberCount}
-          reviewerId={session.user.id}
           currentUserId={session.user.id}
           onProjectSaved={async () => {
             setMessage("Project setup saved.");
@@ -258,8 +265,6 @@ function InvestmentApp({ session }: { session: Session }) {
 function AuthScreen() {
   const [email, setEmail] = useState("");
   const [password, setPassword] = useState("");
-  const [fullName, setFullName] = useState("");
-  const [mode, setMode] = useState<"login" | "signup">("login");
   const [showPassword, setShowPassword] = useState(false);
   const [busy, setBusy] = useState(false);
   const [message, setMessage] = useState<string | null>(null);
@@ -269,18 +274,31 @@ function AuthScreen() {
     setBusy(true);
     setMessage(null);
     try {
-      const result = mode === "login"
-        ? await supabase.auth.signInWithPassword({ email, password })
-        : await supabase.auth.signUp({
-            email,
-            password,
-            options: { data: { full_name: fullName } },
-          });
-
+      const result = await supabase.auth.signInWithPassword({ email, password });
       if (result.error) throw result.error;
-      if (mode === "signup") setMessage("Account created. Check email confirmation settings in Supabase if login is blocked.");
     } catch (err) {
       setMessage(getErrorMessage(err, "Authentication failed."));
+    } finally {
+      setBusy(false);
+    }
+  }
+
+  async function sendPasswordReset() {
+    if (!email.trim()) {
+      setMessage("Enter your email address first.");
+      return;
+    }
+
+    setBusy(true);
+    setMessage(null);
+    try {
+      const { error } = await supabase.auth.resetPasswordForEmail(email.trim(), {
+        redirectTo: window.location.origin,
+      });
+      if (error) throw error;
+      setMessage("Password reset email sent. Open the link to choose a new password.");
+    } catch (err) {
+      setMessage(getErrorMessage(err, "Could not send password reset email."));
     } finally {
       setBusy(false);
     }
@@ -325,22 +343,9 @@ function AuthScreen() {
         </section>
         <form className="auth-panel" onSubmit={(event) => void submit(event)}>
           <div className="auth-panel-head">
-            <h1>{mode === "login" ? "Welcome back" : "Create account"}</h1>
-            <p>{mode === "login" ? "Sign in to your investment dashboard" : "Create your member account"}</p>
+            <h1>Welcome back</h1>
+            <p>Sign in to your private investment dashboard</p>
           </div>
-          <div className="segmented-control full auth-tabs">
-            <button type="button" className={mode === "login" ? "active" : ""} onClick={() => setMode("login")}>Login</button>
-            <button type="button" className={mode === "signup" ? "active" : ""} onClick={() => setMode("signup")}>Sign up</button>
-          </div>
-          {mode === "signup" && (
-            <label className="auth-field">
-              Full name
-              <span>
-                <UserRound size={18} />
-                <input value={fullName} onChange={(event) => setFullName(event.target.value)} required />
-              </span>
-            </label>
-          )}
           <label className="auth-field">
             Email
             <span>
@@ -352,7 +357,7 @@ function AuthScreen() {
             Password
             <span>
               <LockKeyhole size={18} />
-              <input type={showPassword ? "text" : "password"} minLength={6} value={password} onChange={(event) => setPassword(event.target.value)} required />
+              <input type={showPassword ? "text" : "password"} value={password} onChange={(event) => setPassword(event.target.value)} required />
               <button
                 className="password-toggle"
                 type="button"
@@ -365,26 +370,76 @@ function AuthScreen() {
             </span>
           </label>
           <div className="auth-row">
-            <label className="remember-choice">
-              <input type="checkbox" defaultChecked />
-              <span>Remember me</span>
-            </label>
-            <button type="button" className="text-button">Forgot password?</button>
+            <span />
+            <button type="button" className="text-button" onClick={() => void sendPasswordReset()} disabled={busy}>Forgot password?</button>
           </div>
           <button className="primary-button auth-submit" type="submit" disabled={busy}>
-            {busy ? "Please wait" : mode === "login" ? "Sign in to dashboard" : "Create account"}
+            {busy ? "Please wait" : "Sign in to dashboard"}
           </button>
           {message && <p className="form-message">{message}</p>}
-          <p className="auth-switch">
-            {mode === "login" ? "Don't have an account?" : "Already have an account?"}
-            <button type="button" onClick={() => setMode(mode === "login" ? "signup" : "login")}>
-              {mode === "login" ? "Create one" : "Login"}
-            </button>
-          </p>
           <div className="auth-security">
             <span><ShieldCheck size={14} /> Private ledger</span>
             <span><CheckCircle2 size={14} /> Protected receipts</span>
           </div>
+        </form>
+      </main>
+    </PageShell>
+  );
+}
+
+function PasswordRecoveryScreen({ onDone }: { onDone: () => void }) {
+  const [password, setPassword] = useState("");
+  const [confirmation, setConfirmation] = useState("");
+  const [showPassword, setShowPassword] = useState(false);
+  const [busy, setBusy] = useState(false);
+  const [message, setMessage] = useState<string | null>(null);
+
+  async function updatePassword(event: React.FormEvent<HTMLFormElement>) {
+    event.preventDefault();
+    if (password !== confirmation) {
+      setMessage("Passwords do not match.");
+      return;
+    }
+
+    setBusy(true);
+    setMessage(null);
+    try {
+      const { error } = await supabase.auth.updateUser({ password });
+      if (error) throw error;
+      onDone();
+    } catch (err) {
+      setMessage(getErrorMessage(err, "Could not update password."));
+    } finally {
+      setBusy(false);
+    }
+  }
+
+  return (
+    <PageShell compact>
+      <main className="auth-layout auth-showcase">
+        <section className="auth-copy">
+          <div className="auth-brand"><span><LockKeyhole size={22} /></span><strong>HomeFund</strong></div>
+          <h1>Choose a new password.</h1>
+          <p>Use at least eight characters and keep this password private.</p>
+        </section>
+        <form className="auth-panel" onSubmit={(event) => void updatePassword(event)}>
+          <div className="auth-panel-head"><h1>Reset password</h1><p>Enter and confirm your new password.</p></div>
+          <label className="auth-field">
+            New password
+            <span>
+              <LockKeyhole size={18} />
+              <input type={showPassword ? "text" : "password"} minLength={8} value={password} onChange={(event) => setPassword(event.target.value)} required />
+              <button className="password-toggle" type="button" onClick={() => setShowPassword((current) => !current)} aria-label={showPassword ? "Hide password" : "Show password"}>
+                {showPassword ? <EyeOff size={18} /> : <Eye size={18} />}
+              </button>
+            </span>
+          </label>
+          <label className="auth-field">
+            Confirm password
+            <span><LockKeyhole size={18} /><input type={showPassword ? "text" : "password"} minLength={8} value={confirmation} onChange={(event) => setConfirmation(event.target.value)} required /></span>
+          </label>
+          <button className="primary-button auth-submit" type="submit" disabled={busy}>{busy ? "Updating" : "Update password"}</button>
+          {message && <p className="form-message">{message}</p>}
         </form>
       </main>
     </PageShell>
@@ -636,7 +691,7 @@ function MemberOverview({ profile, project, contributions, projectCollections, p
 }
 
 function currentMonthKey() {
-  return new Date().toISOString().slice(0, 7);
+  return localDateKey().slice(0, 7);
 }
 
 function coverageBalanceLabel(coverage: ReturnType<typeof getMonthlyPaymentCoverage>) {
@@ -838,7 +893,7 @@ function PaymentForm({ userId, project, onSubmitted, onError }: {
   onSubmitted: () => Promise<void>;
   onError: (message: string) => void;
 }) {
-  const [paymentDate, setPaymentDate] = useState(new Date().toISOString().slice(0, 10));
+  const [paymentDate, setPaymentDate] = useState(localDateKey());
   const [bdtAmount, setBdtAmount] = useState("");
   const [sourceCurrency, setSourceCurrency] = useState("");
   const [sourceAmount, setSourceAmount] = useState("");
@@ -861,6 +916,10 @@ function PaymentForm({ userId, project, onSubmitted, onError }: {
     }
     if (!allowedReceiptTypes.includes(receipt.type)) {
       onError("Receipt must be PDF, JPG, or PNG.");
+      return;
+    }
+    if (receipt.size > MAX_RECEIPT_BYTES) {
+      onError("Receipt must be 10 MB or smaller.");
       return;
     }
 
@@ -963,7 +1022,7 @@ function AdminPaymentForm({ project, members, onSubmitted, onError }: {
     [members],
   );
   const [memberId, setMemberId] = useState(activeMembers[0]?.id ?? "");
-  const [paymentDate, setPaymentDate] = useState(new Date().toISOString().slice(0, 10));
+  const [paymentDate, setPaymentDate] = useState(localDateKey());
   const [bdtAmount, setBdtAmount] = useState("");
   const [sourceCurrency, setSourceCurrency] = useState("");
   const [sourceAmount, setSourceAmount] = useState("");
@@ -975,7 +1034,7 @@ function AdminPaymentForm({ project, members, onSubmitted, onError }: {
   const [busy, setBusy] = useState(false);
 
   useEffect(() => {
-    if (!memberId && activeMembers[0]) {
+    if (activeMembers[0] && !activeMembers.some((member) => member.id === memberId)) {
       // eslint-disable-next-line react-hooks/set-state-in-effect
       setMemberId(activeMembers[0].id);
     }
@@ -993,6 +1052,10 @@ function AdminPaymentForm({ project, members, onSubmitted, onError }: {
     }
     if (!allowedReceiptTypes.includes(receipt.type)) {
       onError("Receipt must be PDF, JPG, or PNG.");
+      return;
+    }
+    if (receipt.size > MAX_RECEIPT_BYTES) {
+      onError("Receipt must be 10 MB or smaller.");
       return;
     }
 
@@ -1109,12 +1172,11 @@ function AdminPaymentForm({ project, members, onSubmitted, onError }: {
   );
 }
 
-function AdminDashboard({ project, contributions, projectCollections, projectMemberCount, reviewerId, currentUserId, onProjectSaved, onReviewed, onError, onSignOut }: {
+function AdminDashboard({ project, contributions, projectCollections, projectMemberCount, currentUserId, onProjectSaved, onReviewed, onError, onSignOut }: {
   project: InvestmentProject | null;
   contributions: Contribution[];
   projectCollections: Contribution[];
   projectMemberCount: number;
-  reviewerId: string;
   currentUserId: string;
   onProjectSaved: () => Promise<void>;
   onReviewed: (message: string) => Promise<void>;
@@ -1151,8 +1213,6 @@ function AdminDashboard({ project, contributions, projectCollections, projectMem
     try {
       await reviewContribution({
         contributionId: contribution.id,
-        reviewerId,
-        projectId: contribution.project_id,
         status,
         rejectionReason: reason,
       });
@@ -1638,7 +1698,7 @@ function isMemberAccount(member: MemberRecord) {
 
 function getEffectiveMembershipStatus(member: MemberRecord): MembershipStatus {
   if (member.role === "admin") return "left";
-  return member.membership?.status ?? "active";
+  return member.membership?.status ?? "left";
 }
 
 function escapeCsvCell(value: string | number | null | undefined) {
@@ -1906,7 +1966,7 @@ function AdminCreateMemberForm({ projectId, onCreated, onError }: {
   const [phone, setPhone] = useState("");
   const [country, setCountry] = useState("");
   const [memberCode, setMemberCode] = useState("");
-  const [joinedAt, setJoinedAt] = useState(new Date().toISOString().slice(0, 10));
+  const [joinedAt, setJoinedAt] = useState(localDateKey());
   const [status, setStatus] = useState<MembershipStatus>("active");
   const [busy, setBusy] = useState(false);
   const [open, setOpen] = useState(true);
@@ -1933,7 +1993,7 @@ function AdminCreateMemberForm({ projectId, onCreated, onError }: {
       setPhone("");
       setCountry("");
       setMemberCode("");
-      setJoinedAt(new Date().toISOString().slice(0, 10));
+      setJoinedAt(localDateKey());
       setStatus("active");
       await onCreated();
     } catch (err) {
@@ -1970,7 +2030,7 @@ function AdminCreateMemberForm({ projectId, onCreated, onError }: {
               <span className="field-with-action">
                 <input
                   type={showPassword ? "text" : "password"}
-                  minLength={6}
+                  minLength={8}
                   value={password}
                   onChange={(event) => setPassword(event.target.value)}
                   required
@@ -2043,7 +2103,7 @@ function MemberEditor({ member, projectId, isCurrentUser, onSaved, onError }: {
   const [country, setCountry] = useState(member.resident_country ?? "");
   const [role, setRole] = useState<ProfileRole>(member.role);
   const [memberCode, setMemberCode] = useState(member.membership?.member_code ?? "");
-  const [joinedAt, setJoinedAt] = useState(member.membership?.joined_at ?? new Date().toISOString().slice(0, 10));
+  const [joinedAt, setJoinedAt] = useState(member.membership?.joined_at ?? localDateKey());
   const [status, setStatus] = useState<MembershipStatus>(getEffectiveMembershipStatus(member));
   const [busy, setBusy] = useState(false);
   const isAdminRole = role === "admin";
@@ -2057,7 +2117,7 @@ function MemberEditor({ member, projectId, isCurrentUser, onSaved, onError }: {
     setCountry(member.resident_country ?? "");
     setRole(member.role);
     setMemberCode(member.membership?.member_code ?? "");
-    setJoinedAt(member.membership?.joined_at ?? new Date().toISOString().slice(0, 10));
+    setJoinedAt(member.membership?.joined_at ?? localDateKey());
     setStatus(getEffectiveMembershipStatus(member));
   }, [member]);
 

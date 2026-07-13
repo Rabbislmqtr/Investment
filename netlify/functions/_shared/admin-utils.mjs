@@ -82,3 +82,8 @@ export async function readJson(request) {
 export function cleanString(value) {
   return typeof value === "string" ? value.trim() : "";
 }
+
+export function serverError(error, fallback) {
+  console.error(error);
+  return jsonResponse({ error: fallback }, 500);
+}
