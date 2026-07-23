@@ -140,7 +140,9 @@ function App() {
   }, []);
 
   if (!hasSupabaseConfig) return <SetupNotice />;
-  if (loadingSession) return <PageShell><StatusMessage title="Opening your dashboard" body="Checking your login session." /></PageShell>;
+  if (loadingSession) {
+    return <AppLoadingScreen title="Opening your investment dashboard" body="Checking your secure session and preparing the latest fund activity." />;
+  }
   if (recoveringPassword && session) return <PasswordRecoveryScreen onDone={() => setRecoveringPassword(false)} />;
   if (!session) return <AuthScreen />;
 
@@ -250,6 +252,20 @@ function InvestmentApp({ session }: { session: Session }) {
     await loadData(mode, projectId);
   }
 
+  async function refreshAdminContributions() {
+    if (!project) return;
+    setError(null);
+    const contributionData = await getAdminContributions(project.id);
+    setContributions(contributionData);
+    setProjectCollections(
+      contributionData.filter((contribution) => contribution.status === "approved" && !isContributionFromAdmin(contribution)),
+    );
+  }
+
+  if (loading && !profile) {
+    return <AppLoadingScreen title="Preparing your live ledger" body="Loading members, contributions, receipts, and project totals." />;
+  }
+
   return (
     <PageShell adminShell={Boolean(profile)}>
       <header className="app-header">
@@ -289,6 +305,7 @@ function InvestmentApp({ session }: { session: Session }) {
           exitRequests={exitRequests}
           exitSummary={exitSummary}
           currentUserId={session.user.id}
+          onRefreshContributions={refreshAdminContributions}
           onProjectSaved={async (projectId, text = "Project setup saved.") => {
             setMessage(text);
             await loadData("admin", projectId);
@@ -1364,7 +1381,7 @@ function AdminPaymentForm({ project, members, onSubmitted, onError }: {
   );
 }
 
-function AdminDashboard({ project, projects, contributions, projectCollections, projectMemberCount, exitRequests, exitSummary, currentUserId, onProjectSaved, onReviewed, onExitChanged, onError, onSignOut }: {
+function AdminDashboard({ project, projects, contributions, projectCollections, projectMemberCount, exitRequests, exitSummary, currentUserId, onRefreshContributions, onProjectSaved, onReviewed, onExitChanged, onError, onSignOut }: {
   project: InvestmentProject | null;
   projects: InvestmentProject[];
   contributions: Contribution[];
@@ -1373,6 +1390,7 @@ function AdminDashboard({ project, projects, contributions, projectCollections, 
   exitRequests: MemberExitRequest[];
   exitSummary: ProjectExitSummary;
   currentUserId: string;
+  onRefreshContributions: () => Promise<void>;
   onProjectSaved: (projectId: string, message?: string) => Promise<void>;
   onReviewed: (message: string) => Promise<void>;
   onExitChanged: (message: string) => Promise<void>;
@@ -1383,6 +1401,7 @@ function AdminDashboard({ project, projects, contributions, projectCollections, 
   const [sidebarOpen, setSidebarOpen] = useState(false);
   const [members, setMembers] = useState<MemberRecord[]>([]);
   const [loadingMembers, setLoadingMembers] = useState(false);
+  const [refreshingReview, setRefreshingReview] = useState(false);
   const pending = contributions.filter((item) => item.status === "pending");
 
   async function loadMembers() {
@@ -1433,9 +1452,22 @@ function AdminDashboard({ project, projects, contributions, projectCollections, 
     }
   }
 
+  async function refreshReviewQueue() {
+    if (refreshingReview) return;
+    setRefreshingReview(true);
+    try {
+      await onRefreshContributions();
+    } catch (err) {
+      onError(getErrorMessage(err, "Could not refresh the review queue."));
+    } finally {
+      setRefreshingReview(false);
+    }
+  }
+
   function selectSection(section: AdminSection) {
     setActiveSection(section);
     setSidebarOpen(false);
+    if (section === "review") void refreshReviewQueue();
   }
 
   function handleSignOut() {
@@ -1506,6 +1538,8 @@ function AdminDashboard({ project, projects, contributions, projectCollections, 
         {activeSection === "review" && (
           <PendingReviewPanel
             pending={pending}
+            loading={refreshingReview}
+            onRefresh={refreshReviewQueue}
             onReview={handleReview}
           />
         )}
@@ -1738,8 +1772,10 @@ function AdminOverview({ project, contributions, projectCollections, members, pr
   );
 }
 
-function PendingReviewPanel({ pending, onReview }: {
+function PendingReviewPanel({ pending, loading, onRefresh, onReview }: {
   pending: Contribution[];
+  loading: boolean;
+  onRefresh: () => Promise<void>;
   onReview: (contribution: Contribution, status: "approved" | "rejected") => Promise<void>;
 }) {
   return (
@@ -1749,11 +1785,18 @@ function PendingReviewPanel({ pending, onReview }: {
           <span className="title-icon"><ShieldCheck size={20} /></span>
           <h2>Pending review</h2>
         </div>
-        <span className="count-badge">{pending.length} payments</span>
+        <div className="review-header-actions">
+          <span className="count-badge">{pending.length} payments</span>
+          <button className="secondary-button review-refresh-button" type="button" onClick={() => void onRefresh()} disabled={loading}>
+            <span className={loading ? "refresh-dot spinning" : "refresh-dot"} aria-hidden="true" />
+            {loading ? "Refreshing" : "Refresh"}
+          </button>
+        </div>
       </div>
-      {pending.length === 0 ? (
+      {loading && <SectionRefreshLoader />}
+      {!loading && pending.length === 0 ? (
         <EmptyState text="No pending payments need review." />
-      ) : (
+      ) : pending.length > 0 ? (
         <div className="review-list">
           {pending.map((contribution) => (
             <ReviewItem
@@ -1764,7 +1807,7 @@ function PendingReviewPanel({ pending, onReview }: {
             />
           ))}
         </div>
-      )}
+      ) : null}
     </section>
   );
 }
@@ -3446,6 +3489,45 @@ function StatusMessage({ title, body }: { title: string; body: string }) {
       <h2>{title}</h2>
       <p>{body}</p>
     </div>
+  );
+}
+
+function SectionRefreshLoader() {
+  return (
+    <div className="section-refresh-loader" role="status" aria-live="polite">
+      <span className="section-refresh-spinner" aria-hidden="true" />
+      <div>
+        <strong>Checking for new submissions</strong>
+        <small>Refreshing the latest member payments and receipts.</small>
+      </div>
+    </div>
+  );
+}
+
+function AppLoadingScreen({ title, body }: { title: string; body: string }) {
+  return (
+    <main className="app-loading-screen" role="status" aria-live="polite">
+      <div className="app-loading-glow app-loading-glow-one" aria-hidden="true" />
+      <div className="app-loading-glow app-loading-glow-two" aria-hidden="true" />
+      <section className="app-loading-card">
+        <div className="investment-loader" aria-hidden="true">
+          <span className="loader-orbit loader-orbit-outer" />
+          <span className="loader-orbit loader-orbit-inner" />
+          <span className="loader-spark loader-spark-one" />
+          <span className="loader-spark loader-spark-two" />
+          <span className="loader-core"><ShieldCheck size={30} /></span>
+        </div>
+        <p className="loading-brand">HomeFund secure ledger</p>
+        <h1>{title}</h1>
+        <p className="loading-copy">{body}</p>
+        <div className="loading-progress" aria-hidden="true"><span /></div>
+        <div className="loading-steps" aria-hidden="true">
+          <span>Secure session</span>
+          <span>Live contributions</span>
+          <span>Protected receipts</span>
+        </div>
+      </section>
+    </main>
   );
 }
 

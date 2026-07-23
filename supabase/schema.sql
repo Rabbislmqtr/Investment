@@ -501,6 +501,17 @@ begin
     raise exception 'Selected member is not active in this project.';
   end if;
 
+  if p_storage_bucket is distinct from 'payment-receipts'
+     or split_part(coalesce(p_storage_path, ''), '/', 1) is distinct from p_member_id::text then
+    raise exception 'Receipt path does not belong to the selected member.';
+  end if;
+  if not exists (
+    select 1 from storage.objects
+    where bucket_id = p_storage_bucket and name = p_storage_path
+  ) then
+    raise exception 'Uploaded receipt could not be verified.';
+  end if;
+
   insert into public.contributions (
     project_id, member_id, payment_date, bdt_amount, source_currency,
     source_amount, exchange_rate, sent_from_country, payment_method, notes,
@@ -548,7 +559,7 @@ revoke all on function public.create_pending_contribution_with_receipt(uuid, dat
 revoke all on function public.admin_update_member_record(uuid, uuid, text, text, text, text, text, date, text) from public;
 revoke all on function public.review_contribution(uuid, text, text) from public;
 revoke all on function public.complete_admin_member_creation(uuid, uuid, uuid, text, text, text, text, text, date, text) from public;
-revoke all on function public.create_admin_approved_contribution_with_receipt(uuid, uuid, date, numeric, text, numeric, numeric, text, text, text, text, text, text, text, bigint) from public;
+revoke all on function public.create_admin_approved_contribution_with_receipt(uuid, uuid, date, numeric, text, numeric, numeric, text, text, text, text, text, text, text, bigint) from public, anon, authenticated, service_role;
 grant execute on function public.get_project_member_directory(uuid) to authenticated;
 grant execute on function public.create_pending_contribution_with_receipt(uuid, date, numeric, text, numeric, numeric, text, text, text, text, text, text, text, bigint) to authenticated;
 grant execute on function public.admin_update_member_record(uuid, uuid, text, text, text, text, text, date, text) to authenticated;
@@ -723,6 +734,22 @@ create policy "admins can read receipts"
 on public.payment_receipts for select
 to authenticated
 using ((select private.current_user_role()) = 'admin');
+
+drop policy if exists "admins can insert member receipts" on public.payment_receipts;
+create policy "admins can insert member receipts"
+on public.payment_receipts for insert
+to authenticated
+with check (
+  (select private.current_user_role()) = 'admin'
+  and storage_bucket = 'payment-receipts'
+  and (storage.foldername(storage_path))[1] = uploaded_by::text
+  and exists (
+    select 1
+    from public.contributions contribution
+    where contribution.id = contribution_id
+      and contribution.member_id = uploaded_by
+  )
+);
 
 drop policy if exists "authenticated can read exchange rates" on public.exchange_rates;
 create policy "authenticated can read exchange rates"
