@@ -67,7 +67,6 @@ export default async (request) => {
     const { data: contributionId, error: contributionError } = await service.rpc(
       "create_admin_approved_contribution_with_receipt",
       {
-        p_actor_id: auth.adminUser.id,
         p_project_id: projectId,
         p_member_id: memberId,
         p_payment_date: paymentDate,

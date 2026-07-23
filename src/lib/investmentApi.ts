@@ -2,8 +2,12 @@ import type {
   Contribution,
   DashboardTotals,
   InvestmentProject,
+  GroupMember,
+  MemberExitRequest,
   MemberPaymentStatus,
   MemberRecord,
+  ProjectExitSummary,
+  ProjectStatus,
   MembershipStatus,
   Profile,
   ProfileRole,
@@ -12,9 +16,9 @@ import { supabase } from "./supabase";
 
 const RECEIPT_BUCKET = "payment-receipts";
 export const MAX_RECEIPT_BYTES = 10 * 1024 * 1024;
-export const PROJECT_START_MONTH = "2026-01";
-export const MONTHLY_MEMBER_CONTRIBUTION_BDT = 10000;
-export const BASE_TARGET_MEMBER_COUNT = 10;
+export const DEFAULT_PROJECT_START_MONTH = "2026-01";
+export const DEFAULT_MONTHLY_MEMBER_CONTRIBUTION_BDT = 10000;
+export const DEFAULT_PLANNED_MEMBER_COUNT = 10;
 
 function monthSerial(month: string) {
   const [year, monthNumber] = month.slice(0, 7).split("-").map(Number);
@@ -27,20 +31,24 @@ function monthFromSerial(serial: number) {
   return `${year}-${String(month + 1).padStart(2, "0")}`;
 }
 
-export function getScaledProjectTarget(baseTargetBdt: number, activeMemberCount: number) {
-  if (baseTargetBdt <= 0) return 0;
-  if (activeMemberCount <= BASE_TARGET_MEMBER_COUNT) return baseTargetBdt;
-  const baseTargetPerMember = baseTargetBdt / BASE_TARGET_MEMBER_COUNT;
-  return Math.round(baseTargetPerMember * activeMemberCount);
+export function getPerMemberTarget(projectTargetBdt: number, plannedMemberCount: number) {
+  if (projectTargetBdt <= 0 || plannedMemberCount <= 0) return 0;
+  return projectTargetBdt / plannedMemberCount;
 }
 
-export function getMonthlyPaymentCoverage(totalApprovedBdt: number, selectedMonth: string) {
-  const startSerial = monthSerial(PROJECT_START_MONTH);
+export function getMonthlyPaymentCoverage(
+  totalApprovedBdt: number,
+  selectedMonth: string,
+  monthlyContributionBdt = DEFAULT_MONTHLY_MEMBER_CONTRIBUTION_BDT,
+  projectStartMonth = DEFAULT_PROJECT_START_MONTH,
+) {
+  const safeMonthlyContribution = Math.max(1, monthlyContributionBdt);
+  const startSerial = monthSerial(projectStartMonth);
   const selectedSerial = monthSerial(selectedMonth);
   const dueMonths = Math.max(0, selectedSerial - startSerial + 1);
-  const paidMonths = Math.floor(Math.max(0, totalApprovedBdt) / MONTHLY_MEMBER_CONTRIBUTION_BDT);
+  const paidMonths = Math.floor(Math.max(0, totalApprovedBdt) / safeMonthlyContribution);
   const paidThroughMonth = paidMonths > 0 ? monthFromSerial(startSerial + paidMonths - 1) : null;
-  const requiredBySelectedMonth = dueMonths * MONTHLY_MEMBER_CONTRIBUTION_BDT;
+  const requiredBySelectedMonth = dueMonths * safeMonthlyContribution;
   const remainingDueBdt = Math.max(0, requiredBySelectedMonth - totalApprovedBdt);
   const coveragePercent = requiredBySelectedMonth > 0
     ? Math.min(100, (totalApprovedBdt / requiredBySelectedMonth) * 100)
@@ -52,7 +60,7 @@ export function getMonthlyPaymentCoverage(totalApprovedBdt: number, selectedMont
     paidMonths,
     overdueMonths: Math.max(0, dueMonths - paidMonths),
     advanceMonths: Math.max(0, paidMonths - dueMonths),
-    creditBdt: Math.max(0, totalApprovedBdt % MONTHLY_MEMBER_CONTRIBUTION_BDT),
+    creditBdt: Math.max(0, totalApprovedBdt % safeMonthlyContribution),
     remainingDueBdt,
     coveragePercent,
     paidThroughMonth,
@@ -85,17 +93,16 @@ export async function updateProfile(profile: Pick<Profile, "id" | "full_name" | 
   if (error) throw error;
 }
 
-export async function getActiveProject(): Promise<InvestmentProject | null> {
+const projectSelect = "id, name, description, target_amount_bdt, currency_code, is_active, status, planned_member_count, monthly_contribution_bdt, contribution_start_month, created_at";
+
+export async function getVisibleProjects(): Promise<InvestmentProject[]> {
   const { data, error } = await supabase
     .from("investment_projects")
-    .select("id, name, description, target_amount_bdt, currency_code, is_active")
-    .eq("is_active", true)
-    .order("created_at", { ascending: true })
-    .limit(1)
-    .maybeSingle();
+    .select(projectSelect)
+    .order("created_at", { ascending: true });
 
   if (error) throw error;
-  return data;
+  return (data ?? []) as InvestmentProject[];
 }
 
 export async function updateProjectSettings(input: {
@@ -103,6 +110,11 @@ export async function updateProjectSettings(input: {
   name: string;
   description: string | null;
   targetAmountBdt: number;
+  plannedMemberCount: number;
+  monthlyContributionBdt: number;
+  contributionStartMonth: string;
+  currencyCode: string;
+  status: ProjectStatus;
 }) {
   const { error } = await supabase
     .from("investment_projects")
@@ -110,12 +122,48 @@ export async function updateProjectSettings(input: {
       name: input.name,
       description: input.description,
       target_amount_bdt: input.targetAmountBdt,
+      planned_member_count: input.plannedMemberCount,
+      monthly_contribution_bdt: input.monthlyContributionBdt,
+      contribution_start_month: `${input.contributionStartMonth}-01`,
+      currency_code: input.currencyCode,
+      status: input.status,
+      is_active: input.status === "active",
     })
     .eq("id", input.id)
     .select("id")
     .single();
 
   if (error) throw error;
+}
+
+export async function createProject(input: {
+  name: string;
+  description: string | null;
+  targetAmountBdt: number;
+  plannedMemberCount: number;
+  monthlyContributionBdt: number;
+  contributionStartMonth: string;
+  currencyCode: string;
+  status: ProjectStatus;
+}): Promise<InvestmentProject> {
+  const { data, error } = await supabase
+    .from("investment_projects")
+    .insert({
+      name: input.name,
+      description: input.description,
+      target_amount_bdt: input.targetAmountBdt,
+      planned_member_count: input.plannedMemberCount,
+      monthly_contribution_bdt: input.monthlyContributionBdt,
+      contribution_start_month: `${input.contributionStartMonth}-01`,
+      currency_code: input.currencyCode,
+      status: input.status,
+      is_active: input.status === "active",
+    })
+    .select(projectSelect)
+    .single();
+
+  if (error) throw error;
+  return data as InvestmentProject;
 }
 
 export async function getAdminMembers(projectId: string): Promise<MemberRecord[]> {
@@ -126,7 +174,7 @@ export async function getAdminMembers(projectId: string): Promise<MemberRecord[]
       .order("full_name", { ascending: true }),
     supabase
       .from("group_members")
-      .select("id, project_id, user_id, member_code, joined_at, status")
+      .select("id, project_id, user_id, member_code, joined_at, status, left_at, exit_request_id")
       .eq("project_id", projectId),
   ]);
 
@@ -141,15 +189,165 @@ export async function getAdminMembers(projectId: string): Promise<MemberRecord[]
   })) as MemberRecord[];
 }
 
+export async function getAdminProjectMemberships(): Promise<GroupMember[]> {
+  const { data, error } = await supabase
+    .from("group_members")
+    .select("id, project_id, user_id, member_code, joined_at, status, left_at, exit_request_id")
+    .order("joined_at", { ascending: true });
+
+  if (error) throw error;
+  return (data ?? []) as GroupMember[];
+}
+
+export async function setProjectMembershipAssignment(input: {
+  projectId: string;
+  userId: string;
+  assigned: boolean;
+  status?: Exclude<MembershipStatus, "left">;
+}) {
+  const { error } = await supabase.rpc("admin_set_project_membership", {
+    p_project_id: input.projectId,
+    p_user_id: input.userId,
+    p_assigned: input.assigned,
+    p_status: input.status ?? "active",
+  });
+
+  if (error) throw error;
+}
+
 export async function getProjectMemberCount(projectId: string): Promise<number> {
   const { count, error } = await supabase
     .from("group_members")
     .select("id", { count: "exact", head: true })
     .eq("project_id", projectId)
-    .neq("status", "left");
+    .eq("status", "active");
 
   if (error) throw error;
   return count ?? 0;
+}
+
+export async function getMemberExitRequests(projectId: string, memberId?: string): Promise<MemberExitRequest[]> {
+  let query = supabase
+    .from("member_exit_requests")
+    .select(
+      "*, member:profiles!member_exit_requests_member_id_fkey(full_name, email), member_refunds(*)",
+    )
+    .eq("project_id", projectId)
+    .order("created_at", { ascending: false });
+
+  if (memberId) query = query.eq("member_id", memberId);
+
+  const { data, error } = await query;
+  if (error) throw error;
+  return (data ?? []) as MemberExitRequest[];
+}
+
+export async function getProjectExitSummary(projectId: string): Promise<ProjectExitSummary> {
+  const { data, error } = await supabase.rpc("get_project_exit_summary", {
+    target_project_id: projectId,
+  });
+  if (error) throw error;
+  const row = Array.isArray(data) ? data[0] : data;
+  return {
+    refundsPaidBdt: Number(row?.refunds_paid_bdt ?? 0),
+    refundsReservedBdt: Number(row?.refunds_reserved_bdt ?? 0),
+  };
+}
+
+export async function requestMemberExit(input: {
+  projectId: string;
+  preferredExitDate?: string | null;
+  reason: string;
+  memberNotes?: string | null;
+}) {
+  const { data, error } = await supabase.rpc("request_member_exit", {
+    p_project_id: input.projectId,
+    p_preferred_exit_date: input.preferredExitDate || null,
+    p_reason: input.reason,
+    p_member_notes: input.memberNotes || null,
+  });
+  if (error) throw error;
+  return data as string;
+}
+
+export async function cancelMemberExit(exitRequestId: string) {
+  const { error } = await supabase.rpc("cancel_member_exit", {
+    p_exit_request_id: exitRequestId,
+  });
+  if (error) throw error;
+}
+
+export async function reviewMemberExit(input: {
+  exitRequestId: string;
+  decision: "approve" | "reject";
+  effectiveExitDate: string;
+  refundDueDate: string;
+  allocatedProfitBdt?: number;
+  allocatedLossBdt?: number;
+  deductionsBdt?: number;
+  exitFeeBdt?: number;
+  adminNotes?: string | null;
+}) {
+  const { data, error } = await supabase.rpc("review_member_exit", {
+    p_exit_request_id: input.exitRequestId,
+    p_decision: input.decision,
+    p_effective_exit_date: input.effectiveExitDate,
+    p_refund_due_date: input.refundDueDate,
+    p_allocated_profit_bdt: input.allocatedProfitBdt ?? 0,
+    p_allocated_loss_bdt: input.allocatedLossBdt ?? 0,
+    p_deductions_bdt: input.deductionsBdt ?? 0,
+    p_exit_fee_bdt: input.exitFeeBdt ?? 0,
+    p_admin_notes: input.adminNotes || null,
+  });
+  if (error) throw error;
+  return Number(data ?? 0);
+}
+
+export async function recordMemberRefund(input: {
+  exitRequestId: string;
+  memberId: string;
+  amountBdt: number;
+  paymentDate: string;
+  paymentMethod: string;
+  paymentReference?: string | null;
+  notes?: string | null;
+  proof: File;
+}) {
+  if (input.proof.size > MAX_RECEIPT_BYTES) {
+    throw new Error("Refund proof must be 10 MB or smaller.");
+  }
+  const extension = input.proof.name.split(".").pop()?.toLowerCase() || "file";
+  const storagePath = `${input.memberId}/refunds/${crypto.randomUUID()}.${extension}`;
+  const { error: uploadError } = await supabase.storage.from(RECEIPT_BUCKET).upload(storagePath, input.proof, {
+    contentType: input.proof.type,
+    cacheControl: "3600",
+    upsert: false,
+  });
+  if (uploadError) throw uploadError;
+
+  const { data, error } = await supabase.rpc("record_member_refund", {
+    p_exit_request_id: input.exitRequestId,
+    p_amount_bdt: input.amountBdt,
+    p_payment_date: input.paymentDate,
+    p_payment_method: input.paymentMethod,
+    p_payment_reference: input.paymentReference || null,
+    p_notes: input.notes || null,
+    p_storage_bucket: RECEIPT_BUCKET,
+    p_storage_path: storagePath,
+    p_file_name: input.proof.name,
+    p_file_type: input.proof.type,
+    p_file_size: input.proof.size,
+  });
+
+  if (error) {
+    if (error.code) await supabase.storage.from(RECEIPT_BUCKET).remove([storagePath]);
+    throw error;
+  }
+  return data as string;
+}
+
+export function getExitRequestPaidBdt(exitRequest: { member_refunds?: Array<{ amount_bdt: number }> }) {
+  return (exitRequest.member_refunds ?? []).reduce((sum, refund) => sum + Number(refund.amount_bdt), 0);
 }
 
 export async function updateMemberRecord(input: {
@@ -209,13 +407,13 @@ export async function getProjectApprovedContributions(projectId: string): Promis
 export async function getMemberPaymentStatus(
   projectId: string,
   month: string,
-  options: { includeFinancialDetails?: boolean } = {},
+  options: { includeFinancialDetails?: boolean; monthlyContributionBdt?: number; projectStartMonth?: string } = {},
 ): Promise<MemberPaymentStatus[]> {
   const { data: memberships, error: membershipsError } = await supabase
     .from("group_members")
-    .select("id, project_id, user_id, member_code, joined_at, status")
+    .select("id, project_id, user_id, member_code, joined_at, status, left_at, exit_request_id")
     .eq("project_id", projectId)
-    .neq("status", "left")
+    .eq("status", "active")
     .order("member_code", { ascending: true });
 
   if (membershipsError) throw membershipsError;
@@ -272,7 +470,12 @@ export async function getMemberPaymentStatus(
         .slice()
         .sort((a, b) => b.payment_date.localeCompare(a.payment_date));
       const approvedTotalBdt = memberContributions.reduce((sum, contribution) => sum + Number(contribution.bdt_amount ?? 0), 0);
-      const coverage = getMonthlyPaymentCoverage(approvedTotalBdt, month);
+      const coverage = getMonthlyPaymentCoverage(
+        approvedTotalBdt,
+        month,
+        options.monthlyContributionBdt,
+        options.projectStartMonth,
+      );
       const lastContribution = sortedContributions[0];
       const receipt = options.includeFinancialDetails ? lastContribution?.payment_receipts?.[0] : null;
 
@@ -281,6 +484,7 @@ export async function getMemberPaymentStatus(
         memberName: profile?.full_name || "Member",
         email: null,
         memberCode: membership.member_code,
+        joinedAt: membership.joined_at,
         membershipStatus: membership.status,
         paid: coverage.paid,
         approvedTotalBdt,
@@ -439,14 +643,33 @@ export async function submitAdminApprovedContribution(input: {
   });
   if (uploadError) throw uploadError;
 
-  return postAdminFunction<{ contributionId: string }>("/.netlify/functions/admin-submit-member-payment", {
-    ...input,
-    receipt: undefined,
-    storagePath,
-    fileSize: input.receipt.size,
-    fileName: input.receipt.name,
-    fileType: input.receipt.type,
-  });
+  const { data: contributionId, error: contributionError } = await supabase.rpc(
+    "create_admin_approved_contribution_with_receipt",
+    {
+      p_project_id: input.projectId,
+      p_member_id: input.memberId,
+      p_payment_date: input.paymentDate,
+      p_bdt_amount: input.bdtAmount,
+      p_source_currency: input.sourceCurrency || null,
+      p_source_amount: input.sourceAmount ?? null,
+      p_exchange_rate: input.exchangeRate ?? null,
+      p_sent_from_country: input.sentFromCountry || null,
+      p_payment_method: input.paymentMethod || null,
+      p_notes: input.notes || null,
+      p_storage_bucket: RECEIPT_BUCKET,
+      p_storage_path: storagePath,
+      p_file_name: input.receipt.name,
+      p_file_type: input.receipt.type,
+      p_file_size: input.receipt.size,
+    },
+  );
+
+  if (contributionError) {
+    if (contributionError.code) await supabase.storage.from(RECEIPT_BUCKET).remove([storagePath]);
+    throw contributionError;
+  }
+
+  return { contributionId };
 }
 
 export async function reviewContribution(input: {

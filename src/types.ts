@@ -1,6 +1,8 @@
 export type ProfileRole = "member" | "admin" | "viewer";
 export type ContributionStatus = "pending" | "approved" | "rejected";
 export type MembershipStatus = "active" | "paused" | "left";
+export type ProjectStatus = "draft" | "active" | "paused" | "completed" | "archived";
+export type MemberExitStatus = "requested" | "settlement_approved" | "refund_pending" | "completed" | "rejected" | "cancelled";
 
 export type Profile = {
   id: string;
@@ -18,6 +20,11 @@ export type InvestmentProject = {
   target_amount_bdt: number;
   currency_code: string;
   is_active: boolean;
+  status: ProjectStatus;
+  planned_member_count: number;
+  monthly_contribution_bdt: number;
+  contribution_start_month: string;
+  created_at: string;
 };
 
 export type GroupMember = {
@@ -27,6 +34,8 @@ export type GroupMember = {
   member_code: string | null;
   joined_at: string;
   status: MembershipStatus;
+  left_at: string | null;
+  exit_request_id: string | null;
 };
 
 export type MemberRecord = Profile & {
@@ -38,6 +47,7 @@ export type MemberPaymentStatus = {
   memberName: string;
   email: string | null;
   memberCode: string | null;
+  joinedAt: string | null;
   membershipStatus: MembershipStatus;
   paid: boolean;
   approvedTotalBdt: number;
@@ -88,6 +98,56 @@ export type PaymentReceipt = {
   file_type: string | null;
   file_size: number | null;
   created_at: string;
+};
+
+export type MemberRefund = {
+  id: string;
+  exit_request_id: string;
+  project_id: string;
+  member_id: string;
+  amount_bdt: number;
+  payment_date: string;
+  payment_method: string;
+  payment_reference: string | null;
+  notes: string | null;
+  storage_bucket: string;
+  storage_path: string;
+  file_name: string;
+  file_type: string | null;
+  file_size: number | null;
+  paid_by: string;
+  created_at: string;
+};
+
+export type MemberExitRequest = {
+  id: string;
+  project_id: string;
+  member_id: string;
+  preferred_exit_date: string | null;
+  effective_exit_date: string | null;
+  reason: string;
+  status: MemberExitStatus;
+  approved_contributions_bdt: number;
+  allocated_profit_bdt: number;
+  allocated_loss_bdt: number;
+  deductions_bdt: number;
+  exit_fee_bdt: number;
+  settlement_amount_bdt: number;
+  refund_due_date: string | null;
+  member_notes: string | null;
+  admin_notes: string | null;
+  reviewed_by: string | null;
+  reviewed_at: string | null;
+  completed_at: string | null;
+  created_at: string;
+  updated_at: string;
+  member?: Pick<Profile, "full_name" | "email"> | null;
+  member_refunds?: MemberRefund[];
+};
+
+export type ProjectExitSummary = {
+  refundsPaidBdt: number;
+  refundsReservedBdt: number;
 };
 
 export type DashboardTotals = {

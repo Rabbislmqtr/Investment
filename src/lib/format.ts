@@ -1,9 +1,9 @@
 export function formatBdt(value: number): string {
-  return new Intl.NumberFormat("en-BD", {
-    style: "currency",
-    currency: "BDT",
+  const amount = new Intl.NumberFormat("en-BD", {
     maximumFractionDigits: 0,
   }).format(value);
+
+  return `BDT ${amount}`;
 }
 
 export function formatDate(value: string | null | undefined): string {

@@ -457,8 +457,8 @@ begin
 end;
 $$;
 
+drop function if exists public.create_admin_approved_contribution_with_receipt(uuid, uuid, uuid, date, numeric, text, numeric, numeric, text, text, text, text, text, text, text, bigint);
 create or replace function public.create_admin_approved_contribution_with_receipt(
-  p_actor_id uuid,
   p_project_id uuid,
   p_member_id uuid,
   p_payment_date date,
@@ -483,6 +483,9 @@ as $$
 declare
   contribution_id uuid;
 begin
+  if (select private.current_user_role()) <> 'admin' then
+    raise exception 'Only admins can submit approved contributions.';
+  end if;
   if not exists (
     select 1 from public.group_members
     where project_id = p_project_id and user_id = p_member_id and status <> 'left'
@@ -497,7 +500,7 @@ begin
   ) values (
     p_project_id, p_member_id, p_payment_date, p_bdt_amount, nullif(p_source_currency, ''),
     p_source_amount, p_exchange_rate, nullif(p_sent_from_country, ''),
-    nullif(p_payment_method, ''), nullif(p_notes, ''), 'approved', p_actor_id, now()
+    nullif(p_payment_method, ''), nullif(p_notes, ''), 'approved', (select auth.uid()), now()
   )
   returning id into contribution_id;
 
@@ -511,7 +514,7 @@ begin
 
   insert into public.audit_logs (actor_id, project_id, contribution_id, action, details)
   values (
-    p_actor_id, p_project_id, contribution_id, 'admin_member_payment_approved',
+    (select auth.uid()), p_project_id, contribution_id, 'admin_member_payment_approved',
     jsonb_build_object('memberId', p_member_id, 'fileName', p_file_name)
   );
 
@@ -537,13 +540,13 @@ revoke all on function public.create_pending_contribution_with_receipt(uuid, dat
 revoke all on function public.admin_update_member_record(uuid, uuid, text, text, text, text, text, date, text) from public;
 revoke all on function public.review_contribution(uuid, text, text) from public;
 revoke all on function public.complete_admin_member_creation(uuid, uuid, uuid, text, text, text, text, text, date, text) from public;
-revoke all on function public.create_admin_approved_contribution_with_receipt(uuid, uuid, uuid, date, numeric, text, numeric, numeric, text, text, text, text, text, text, text, bigint) from public;
+revoke all on function public.create_admin_approved_contribution_with_receipt(uuid, uuid, date, numeric, text, numeric, numeric, text, text, text, text, text, text, text, bigint) from public;
 grant execute on function public.get_project_member_directory(uuid) to authenticated;
 grant execute on function public.create_pending_contribution_with_receipt(uuid, date, numeric, text, numeric, numeric, text, text, text, text, text, text, text, bigint) to authenticated;
 grant execute on function public.admin_update_member_record(uuid, uuid, text, text, text, text, text, date, text) to authenticated;
 grant execute on function public.review_contribution(uuid, text, text) to authenticated;
 grant execute on function public.complete_admin_member_creation(uuid, uuid, uuid, text, text, text, text, text, date, text) to service_role;
-grant execute on function public.create_admin_approved_contribution_with_receipt(uuid, uuid, uuid, date, numeric, text, numeric, numeric, text, text, text, text, text, text, text, bigint) to service_role;
+grant execute on function public.create_admin_approved_contribution_with_receipt(uuid, uuid, date, numeric, text, numeric, numeric, text, text, text, text, text, text, text, bigint) to authenticated;
 
 drop trigger if exists set_profiles_updated_at on public.profiles;
 create trigger set_profiles_updated_at
