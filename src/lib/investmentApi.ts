@@ -618,6 +618,43 @@ export async function createAdminMember(input: {
   return postAdminFunction<{ memberId: string }>("/.netlify/functions/admin-create-member", input);
 }
 
+export async function changeOwnPassword(currentPassword: string, newPassword: string) {
+  const { data: userData, error: userError } = await supabase.auth.getUser();
+  if (userError) throw userError;
+  const email = userData.user?.email;
+  if (!email) throw new Error("This account does not have an email address.");
+
+  const { error: signInError } = await supabase.auth.signInWithPassword({
+    email,
+    password: currentPassword,
+  });
+  if (signInError) throw new Error("The current password is incorrect.");
+
+  const { error: updateError } = await supabase.auth.updateUser({ password: newPassword });
+  if (updateError) throw updateError;
+}
+
+export async function sendPasswordResetEmail(email: string) {
+  const { error } = await supabase.auth.resetPasswordForEmail(email, {
+    redirectTo: window.location.origin,
+  });
+  if (error) throw error;
+}
+
+export async function adminSendPasswordReset(input: { userId: string; projectId: string }) {
+  return postAdminFunction<{ email: string }>("/.netlify/functions/admin-password-action", {
+    ...input,
+    action: "send_reset_link",
+  });
+}
+
+export async function adminGenerateTemporaryPassword(input: { userId: string; projectId: string }) {
+  return postAdminFunction<{ email: string; temporaryPassword: string }>("/.netlify/functions/admin-password-action", {
+    ...input,
+    action: "generate_temporary_password",
+  });
+}
+
 export async function submitAdminApprovedContribution(input: {
   projectId: string;
   memberId: string;

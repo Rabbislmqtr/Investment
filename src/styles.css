@@ -3836,6 +3836,248 @@ tbody tr:hover {
   }
 }
 
+/* Password security */
+.profile-password-card {
+  position: relative;
+  overflow: hidden;
+  margin-top: 20px;
+}
+
+.profile-password-card::before {
+  content: "";
+  position: absolute;
+  top: -110px;
+  right: -90px;
+  width: 260px;
+  height: 260px;
+  border-radius: 50%;
+  pointer-events: none;
+  background: radial-gradient(circle, rgba(47, 125, 246, 0.14), transparent 68%);
+}
+
+.password-security-grid {
+  position: relative;
+  display: grid;
+  grid-template-columns: minmax(0, 1.25fr) minmax(280px, 0.75fr);
+  gap: 18px;
+  align-items: stretch;
+}
+
+.password-change-form,
+.password-recovery-panel {
+  border: 1px solid var(--line-soft);
+  border-radius: 18px;
+  background: rgba(8, 20, 39, 0.56);
+}
+
+.password-change-form {
+  display: grid;
+  grid-template-columns: repeat(2, minmax(0, 1fr));
+  gap: 14px;
+  padding: 20px;
+}
+
+.password-section-heading,
+.password-change-form label:first-of-type,
+.password-change-form .show-password-row,
+.password-change-form button {
+  grid-column: 1 / -1;
+}
+
+.password-section-heading {
+  display: grid;
+  gap: 4px;
+  margin-bottom: 2px;
+}
+
+.password-section-heading strong,
+.password-recovery-panel strong {
+  color: #f1f6ff;
+  font-size: 1rem;
+}
+
+.password-section-heading small,
+.password-recovery-panel p,
+.password-recovery-panel > small {
+  color: #849abb;
+  line-height: 1.55;
+}
+
+.show-password-row {
+  display: inline-flex !important;
+  width: fit-content;
+  flex-direction: row !important;
+  align-items: center;
+  gap: 9px !important;
+  color: #9eb0ca;
+  font-size: 0.82rem;
+  cursor: pointer;
+}
+
+.show-password-row input {
+  width: 16px;
+  height: 16px;
+  margin: 0;
+  accent-color: var(--accent);
+}
+
+.password-recovery-panel {
+  display: flex;
+  flex-direction: column;
+  align-items: flex-start;
+  gap: 16px;
+  padding: 22px;
+  background: linear-gradient(150deg, rgba(30, 92, 195, 0.15), rgba(11, 27, 51, 0.68));
+}
+
+.password-recovery-panel p {
+  margin: 7px 0 0;
+}
+
+.password-recovery-panel b {
+  color: #c9d9f0;
+  overflow-wrap: anywhere;
+}
+
+.password-recovery-panel .secondary-button {
+  width: 100%;
+  margin-top: auto;
+}
+
+.password-recovery-icon {
+  display: grid;
+  width: 46px;
+  height: 46px;
+  flex: 0 0 auto;
+  place-items: center;
+  border: 1px solid rgba(102, 161, 255, 0.22);
+  border-radius: 14px;
+  color: #78adff;
+  background: rgba(47, 125, 246, 0.12);
+}
+
+.member-password-admin {
+  display: grid;
+  gap: 15px;
+  margin-top: 20px;
+  padding: 18px;
+  border: 1px solid rgba(102, 161, 255, 0.18);
+  border-radius: 16px;
+  background: linear-gradient(145deg, rgba(47, 125, 246, 0.09), rgba(8, 20, 39, 0.34));
+}
+
+.member-password-admin-head {
+  display: flex;
+  align-items: center;
+  gap: 13px;
+}
+
+.member-password-admin-head .password-recovery-icon {
+  width: 40px;
+  height: 40px;
+  border-radius: 12px;
+}
+
+.member-password-admin-head h4,
+.member-password-admin-head p,
+.member-password-message,
+.temporary-password-result p {
+  margin: 0;
+}
+
+.member-password-admin-head h4 {
+  color: #eef5ff;
+}
+
+.member-password-admin-head p,
+.temporary-password-result p {
+  margin-top: 4px;
+  color: #8399b9;
+  font-size: 0.79rem;
+  line-height: 1.5;
+}
+
+.member-password-actions {
+  display: flex;
+  flex-wrap: wrap;
+  gap: 9px;
+}
+
+.member-password-message {
+  color: #66dfb8;
+  font-size: 0.84rem;
+}
+
+.temporary-password-result {
+  display: grid;
+  grid-template-columns: minmax(0, 1fr) auto;
+  gap: 12px;
+  align-items: center;
+  padding: 14px;
+  border: 1px solid rgba(45, 212, 168, 0.22);
+  border-radius: 13px;
+  background: rgba(45, 212, 168, 0.07);
+}
+
+.temporary-password-result div {
+  display: grid;
+  min-width: 0;
+  gap: 5px;
+}
+
+.temporary-password-result small {
+  color: #85a1c3;
+}
+
+.temporary-password-result code {
+  overflow-x: auto;
+  color: #b8f8e3;
+  font-size: 1rem;
+  font-weight: 800;
+  letter-spacing: 0.055em;
+  white-space: nowrap;
+}
+
+.temporary-password-result p {
+  grid-column: 1 / -1;
+}
+
+@media (max-width: 760px) {
+  .password-security-grid {
+    grid-template-columns: 1fr;
+  }
+
+  .password-change-form {
+    grid-template-columns: 1fr;
+  }
+
+  .password-change-form label {
+    grid-column: 1;
+  }
+}
+
+@media (max-width: 480px) {
+  .password-change-form,
+  .password-recovery-panel,
+  .member-password-admin {
+    padding: 16px;
+  }
+
+  .member-password-actions,
+  .member-password-actions button {
+    width: 100%;
+  }
+
+  .temporary-password-result {
+    grid-template-columns: 1fr;
+  }
+
+  .temporary-password-result button,
+  .temporary-password-result p {
+    grid-column: 1;
+  }
+}
+
 /* Premium financial dashboard system */
 :root {
   color-scheme: dark;

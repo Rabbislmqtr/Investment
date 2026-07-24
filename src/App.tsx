@@ -35,6 +35,7 @@ import {
   MAX_RECEIPT_BYTES,
   calculateTotals,
   cancelMemberExit,
+  changeOwnPassword,
   createAdminMember,
   createProject,
   getVisibleProjects,
@@ -58,6 +59,9 @@ import {
   reviewContribution,
   submitAdminApprovedContribution,
   submitContribution,
+  sendPasswordResetEmail,
+  adminGenerateTemporaryPassword,
+  adminSendPasswordReset,
   setProjectMembershipAssignment,
   updateMemberRecord,
   updateProjectSettings,
@@ -1113,7 +1117,114 @@ function ProfilePanel({ userId, profile, project, contributions, onSaved, onErro
           <ContributionFeed contributions={recentContributions} />
         </section>
       </div>
+
+      <PasswordSecurityPanel email={profile?.email ?? null} onError={onError} />
     </div>
+  );
+}
+
+function PasswordSecurityPanel({ email, onError }: { email: string | null; onError: (message: string) => void }) {
+  const [currentPassword, setCurrentPassword] = useState("");
+  const [newPassword, setNewPassword] = useState("");
+  const [confirmation, setConfirmation] = useState("");
+  const [showPasswords, setShowPasswords] = useState(false);
+  const [busy, setBusy] = useState(false);
+  const [resetBusy, setResetBusy] = useState(false);
+  const [message, setMessage] = useState<string | null>(null);
+
+  async function changePassword(event: React.FormEvent<HTMLFormElement>) {
+    event.preventDefault();
+    setMessage(null);
+    if (newPassword !== confirmation) {
+      onError("New passwords do not match.");
+      return;
+    }
+    if (newPassword === currentPassword) {
+      onError("Choose a new password that is different from the current password.");
+      return;
+    }
+
+    setBusy(true);
+    try {
+      await changeOwnPassword(currentPassword, newPassword);
+      setCurrentPassword("");
+      setNewPassword("");
+      setConfirmation("");
+      setMessage("Password changed successfully. Use the new password next time you sign in.");
+    } catch (err) {
+      onError(getErrorMessage(err, "Could not change password."));
+    } finally {
+      setBusy(false);
+    }
+  }
+
+  async function emailResetLink() {
+    if (!email) {
+      onError("This account does not have an email address.");
+      return;
+    }
+    setResetBusy(true);
+    setMessage(null);
+    try {
+      await sendPasswordResetEmail(email);
+      setMessage(`A password reset link was sent to ${email}.`);
+    } catch (err) {
+      onError(getErrorMessage(err, "Could not send password reset email."));
+    } finally {
+      setResetBusy(false);
+    }
+  }
+
+  return (
+    <section className="panel profile-password-card">
+      <div className="panel-title split-title">
+        <div>
+          <span className="title-icon"><LockKeyhole size={20} /></span>
+          <div><h2>Password and recovery</h2><p>Change your password directly or send a recovery link to your email.</p></div>
+        </div>
+        <span className="count-badge"><ShieldCheck size={14} /> Secure account</span>
+      </div>
+
+      {message && <InlineNotice tone="success" text={message} onClose={() => setMessage(null)} />}
+
+      <div className="password-security-grid">
+        <form className="password-change-form" onSubmit={(event) => void changePassword(event)}>
+          <div className="password-section-heading">
+            <strong>Change password</strong>
+            <small>Your current password confirms it is really you. No email code is required.</small>
+          </div>
+          <label>
+            Current password
+            <input type={showPasswords ? "text" : "password"} autoComplete="current-password" value={currentPassword} onChange={(event) => setCurrentPassword(event.target.value)} required />
+          </label>
+          <label>
+            New password
+            <input type={showPasswords ? "text" : "password"} autoComplete="new-password" minLength={8} value={newPassword} onChange={(event) => setNewPassword(event.target.value)} required />
+          </label>
+          <label>
+            Confirm new password
+            <input type={showPasswords ? "text" : "password"} autoComplete="new-password" minLength={8} value={confirmation} onChange={(event) => setConfirmation(event.target.value)} required />
+          </label>
+          <label className="show-password-row">
+            <input type="checkbox" checked={showPasswords} onChange={(event) => setShowPasswords(event.target.checked)} />
+            Show passwords
+          </label>
+          <button className="primary-button" type="submit" disabled={busy}>{busy ? "Changing password" : "Change password"}</button>
+        </form>
+
+        <div className="password-recovery-panel">
+          <span className="password-recovery-icon"><Mail size={24} /></span>
+          <div>
+            <strong>Forgot your password?</strong>
+            <p>Send a secure recovery link to <b>{email ?? "your account email"}</b>. The link opens this website so you can choose a new password.</p>
+          </div>
+          <button className="secondary-button" type="button" onClick={() => void emailResetLink()} disabled={resetBusy || !email}>
+            {resetBusy ? "Sending reset link" : "Email me a reset link"}
+          </button>
+          <small>You can also contact an administrator if you cannot access this page.</small>
+        </div>
+      </div>
+    </section>
   );
 }
 
@@ -2982,6 +3093,9 @@ function MemberEditor({ member, projectId, isCurrentUser, approvedTotalBdt, pend
   const [status, setStatus] = useState<MembershipStatus>(getEffectiveMembershipStatus(member));
   const [busy, setBusy] = useState(false);
   const [editing, setEditing] = useState(false);
+  const [passwordBusy, setPasswordBusy] = useState<"email" | "temporary" | null>(null);
+  const [passwordMessage, setPasswordMessage] = useState<string | null>(null);
+  const [temporaryPassword, setTemporaryPassword] = useState<string | null>(null);
   const isAdminRole = role === "admin";
   const displayName = member.full_name || member.email || "Unnamed member";
   const initials = displayName
@@ -3029,6 +3143,57 @@ function MemberEditor({ member, projectId, isCurrentUser, approvedTotalBdt, pend
     }
   }
 
+  async function sendAdminResetLink() {
+    if (!member.email) {
+      onError("This account does not have an email address.");
+      return;
+    }
+    if (!window.confirm(`Send a password reset link to ${member.email}?`)) return;
+
+    setPasswordBusy("email");
+    setPasswordMessage(null);
+    setTemporaryPassword(null);
+    try {
+      const result = await adminSendPasswordReset({ userId: member.id, projectId });
+      setPasswordMessage(`Password reset link sent to ${result.email}.`);
+    } catch (err) {
+      onError(getErrorMessage(err, "Could not send the password reset email."));
+    } finally {
+      setPasswordBusy(null);
+    }
+  }
+
+  async function createTemporaryPassword() {
+    if (isCurrentUser) {
+      onError("Use your own Profile page to change the current admin password.");
+      return;
+    }
+    if (!window.confirm(`Generate a new temporary password for ${displayName}? Their current password will stop working.`)) return;
+
+    setPasswordBusy("temporary");
+    setPasswordMessage(null);
+    setTemporaryPassword(null);
+    try {
+      const result = await adminGenerateTemporaryPassword({ userId: member.id, projectId });
+      setTemporaryPassword(result.temporaryPassword);
+      setPasswordMessage("Temporary password generated. Share it privately with the member.");
+    } catch (err) {
+      onError(getErrorMessage(err, "Could not generate a temporary password."));
+    } finally {
+      setPasswordBusy(null);
+    }
+  }
+
+  async function copyTemporaryPassword() {
+    if (!temporaryPassword) return;
+    try {
+      await navigator.clipboard.writeText(temporaryPassword);
+      setPasswordMessage("Temporary password copied. Share it through a private channel.");
+    } catch {
+      onError("Could not copy automatically. Select and copy the temporary password manually.");
+    }
+  }
+
   return (
     <article className={editing ? "member-card member-summary-card editing" : "member-card member-summary-card"}>
       <div className="member-summary-head">
@@ -3041,7 +3206,13 @@ function MemberEditor({ member, projectId, isCurrentUser, approvedTotalBdt, pend
         </div>
         <div className="member-summary-actions">
           <RolePill role={role} status={status} />
-          <button className="secondary-button member-edit-toggle" type="button" onClick={() => setEditing((current) => !current)}>
+          <button className="secondary-button member-edit-toggle" type="button" onClick={() => setEditing((current) => {
+            if (current) {
+              setTemporaryPassword(null);
+              setPasswordMessage(null);
+            }
+            return !current;
+          })}>
             {editing ? "Close" : "Edit"}
           </button>
         </div>
@@ -3125,8 +3296,36 @@ function MemberEditor({ member, projectId, isCurrentUser, approvedTotalBdt, pend
           </>
         )}
         </div>
+        {!isCurrentUser && member.role !== "admin" && (
+          <section className="member-password-admin">
+            <div className="member-password-admin-head">
+              <span className="password-recovery-icon"><LockKeyhole size={20} /></span>
+              <div><h4>Password access</h4><p>Send a recovery email or replace the current password with a secure temporary one.</p></div>
+            </div>
+            <div className="member-password-actions">
+              <button className="secondary-button" type="button" onClick={() => void sendAdminResetLink()} disabled={passwordBusy !== null || !member.email}>
+                <Mail size={16} /> {passwordBusy === "email" ? "Sending link" : "Send reset email"}
+              </button>
+              <button className="secondary-button temporary-password-button" type="button" onClick={() => void createTemporaryPassword()} disabled={passwordBusy !== null}>
+                <LockKeyhole size={16} /> {passwordBusy === "temporary" ? "Generating" : "Generate temporary password"}
+              </button>
+            </div>
+            {passwordMessage && <p className="member-password-message">{passwordMessage}</p>}
+            {temporaryPassword && (
+              <div className="temporary-password-result" role="status">
+                <div><small>Temporary password</small><code>{temporaryPassword}</code></div>
+                <button className="secondary-button" type="button" onClick={() => void copyTemporaryPassword()}>Copy</button>
+                <p>This value is shown only on this screen. It remains valid until the member changes it from Profile.</p>
+              </div>
+            )}
+          </section>
+        )}
         <div className="member-edit-actions">
-          <button className="secondary-button" type="button" onClick={() => setEditing(false)}>Cancel</button>
+          <button className="secondary-button" type="button" onClick={() => {
+            setEditing(false);
+            setTemporaryPassword(null);
+            setPasswordMessage(null);
+          }}>Cancel</button>
           <button className="primary-button" type="submit" disabled={busy}>{busy ? "Saving" : "Save changes"}</button>
         </div>
       </form>}
