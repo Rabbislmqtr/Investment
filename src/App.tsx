@@ -36,6 +36,7 @@ import {
   calculateTotals,
   cancelMemberExit,
   changeOwnPassword,
+  correctApprovedContributionAmount,
   createAdminMember,
   createProject,
   getVisibleProjects,
@@ -1563,6 +1564,39 @@ function AdminDashboard({ project, projects, contributions, projectCollections, 
     }
   }
 
+  async function correctContributionAmount(contribution: Contribution) {
+    const amountInput = window.prompt(
+      `Correct approved BDT amount for ${getContributionMemberName(contribution)}:`,
+      String(Number(contribution.bdt_amount)),
+    );
+    if (amountInput === null) return;
+
+    const correctedAmount = Number(amountInput);
+    if (!Number.isFinite(correctedAmount) || correctedAmount <= 0) {
+      onError("Enter a valid BDT amount greater than zero.");
+      return;
+    }
+
+    const reason = window.prompt("Reason for this correction?", "Correcting a mistaken amount")?.trim();
+    if (!reason) {
+      onError("A correction reason is required for the audit trail.");
+      return;
+    }
+
+    if (!window.confirm(`Change this approved contribution from ${formatBdt(Number(contribution.bdt_amount))} to ${formatBdt(correctedAmount)}?`)) return;
+
+    try {
+      await correctApprovedContributionAmount({
+        contributionId: contribution.id,
+        bdtAmount: correctedAmount,
+        reason,
+      });
+      await onReviewed("Approved contribution corrected. The original amount was saved in the audit log.");
+    } catch (err) {
+      onError(getErrorMessage(err, "Could not correct the approved contribution."));
+    }
+  }
+
   async function refreshReviewQueue() {
     if (refreshingReview) return;
     setRefreshingReview(true);
@@ -1675,7 +1709,7 @@ function AdminDashboard({ project, projects, contributions, projectCollections, 
           <MemberPaymentStatusPanel project={project} onError={onError} />
         )}
 
-        {activeSection === "reports" && <AdminReportPanel contributions={contributions} exitSummary={exitSummary} onOpenReceipt={openContributionReceipt} />}
+        {activeSection === "reports" && <AdminReportPanel contributions={contributions} exitSummary={exitSummary} onOpenReceipt={openContributionReceipt} onCorrectAmount={correctContributionAmount} />}
 
         {activeSection === "members" && project && (
           <MemberManagementPanel
@@ -2129,10 +2163,11 @@ function downloadCsv(filename: string, rows: Array<Array<string | number | null 
   URL.revokeObjectURL(url);
 }
 
-function AdminReportPanel({ contributions, exitSummary, onOpenReceipt }: {
+function AdminReportPanel({ contributions, exitSummary, onOpenReceipt, onCorrectAmount }: {
   contributions: Contribution[];
   exitSummary: ProjectExitSummary;
   onOpenReceipt: (contribution: Contribution) => Promise<void>;
+  onCorrectAmount: (contribution: Contribution) => Promise<void>;
 }) {
   const [selectedMonth, setSelectedMonth] = useState("all");
   const [selectedMember, setSelectedMember] = useState("all");
@@ -2286,6 +2321,7 @@ function AdminReportPanel({ contributions, exitSummary, onOpenReceipt }: {
                 <th>Method</th>
                 <th>Receipt</th>
                 <th>Reviewed</th>
+                <th>Action</th>
               </tr>
             </thead>
             <tbody>
@@ -2297,6 +2333,7 @@ function AdminReportPanel({ contributions, exitSummary, onOpenReceipt }: {
                   <td data-label="Method">{contribution.payment_method || contribution.sent_from_country || "Not set"}</td>
                   <td data-label="Receipt"><ReceiptLink contribution={contribution} onOpenReceipt={onOpenReceipt} /></td>
                   <td data-label="Reviewed">{formatDate(contribution.reviewed_at)}</td>
+                  <td data-label="Action"><button className="secondary-button ledger-correct-button" type="button" onClick={() => void onCorrectAmount(contribution)}>Edit amount</button></td>
                 </tr>
               ))}
             </tbody>

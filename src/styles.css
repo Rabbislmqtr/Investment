@@ -6395,3 +6395,8 @@ textarea:focus {
     animation-iteration-count: 1;
   }
 }
+.ledger-correct-button {
+  min-height: 36px;
+  padding: 0.45rem 0.75rem;
+  white-space: nowrap;
+}

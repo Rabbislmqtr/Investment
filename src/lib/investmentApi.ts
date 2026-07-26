@@ -723,6 +723,20 @@ export async function reviewContribution(input: {
   if (error) throw error;
 }
 
+export async function correctApprovedContributionAmount(input: {
+  contributionId: string;
+  bdtAmount: number;
+  reason: string;
+}): Promise<void> {
+  const { error } = await supabase.rpc("correct_approved_contribution_amount", {
+    p_contribution_id: input.contributionId,
+    p_bdt_amount: input.bdtAmount,
+    p_reason: input.reason,
+  });
+
+  if (error) throw error;
+}
+
 export function calculateTotals(contributions: Contribution[]): DashboardTotals {
   return contributions.reduce<DashboardTotals>(
     (totals, contribution) => {

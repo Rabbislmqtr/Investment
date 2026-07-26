@@ -1,5 +1,5 @@
 import { describe, expect, it } from "vitest";
-import { generateTemporaryPassword } from "./admin-password-action.mjs";
+import { generateTemporaryPassword } from "../functions/admin-password-action.mjs";
 
 describe("generateTemporaryPassword", () => {
   it("creates secure 16-character passwords with every required character class", () => {
