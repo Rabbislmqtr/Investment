@@ -44,6 +44,7 @@ import {
   getAdminMembers,
   getAdminProjectMemberships,
   getCurrentProfile,
+  getApprovedContributionTotalsByCoveredMonth,
   getMonthlyPaymentCoverage,
   getMemberContributions,
   getMemberExitRequests,
@@ -801,7 +802,11 @@ function MemberOverview({ project, contributions, projectCollections, projectMem
           </div>
           <span className="title-icon"><Banknote size={20} /></span>
         </div>
-        <CollectionChart contributions={projectCollections} />
+        <CollectionChart
+          contributions={projectCollections}
+          monthlyContributionBdt={monthlyContribution}
+          projectStartMonth={projectStartMonth}
+        />
         <div className="mini-card-row">
           <MiniStat label="Gross collected" value={formatBdt(projectTotals.approved)} />
           <MiniStat label="Refunds paid" value={formatBdt(exitSummary.refundsPaidBdt)} />
@@ -1827,7 +1832,11 @@ function AdminOverview({ project, contributions, projectCollections, members, pr
           </div>
           <span className="title-icon"><ShieldCheck size={20} /></span>
         </div>
-        <CollectionChart contributions={projectCollections} />
+        <CollectionChart
+          contributions={projectCollections}
+          monthlyContributionBdt={monthlyContribution}
+          projectStartMonth={projectStartMonth}
+        />
         <div className="mini-card-row">
           <MiniStat label="Gross collected" value={formatBdt(approvedTotal)} />
           <MiniStat label="Refunds paid" value={formatBdt(exitSummary.refundsPaidBdt)} />
@@ -1982,16 +1991,23 @@ function MiniStat({ label, value }: { label: string; value: string }) {
   );
 }
 
-function CollectionChart({ contributions }: { contributions: Contribution[] }) {
+function CollectionChart({ contributions, monthlyContributionBdt, projectStartMonth }: {
+  contributions: Contribution[];
+  monthlyContributionBdt: number;
+  projectStartMonth: string;
+}) {
   const [monthOffset, setMonthOffset] = useState(0);
-  const months = useMemo(() => getCollectionWindow(contributions, monthOffset), [contributions, monthOffset]);
+  const months = useMemo(
+    () => getCollectionWindow(contributions, monthOffset, monthlyContributionBdt, projectStartMonth),
+    [contributions, monthOffset, monthlyContributionBdt, projectStartMonth],
+  );
   const periodLabel = `${months[0]?.label ?? ""} - ${months[months.length - 1]?.label ?? ""}`;
 
   return (
     <div className="collection-chart">
       <div className="collection-chart-head">
         <div>
-          <span>Monthly collection</span>
+          <span>Monthly collection coverage</span>
           <strong>{periodLabel}</strong>
         </div>
         <div className="chart-arrow-group">
@@ -2081,15 +2097,17 @@ function monthKeyFromDate(date: Date) {
   return `${date.getFullYear()}-${String(date.getMonth() + 1).padStart(2, "0")}`;
 }
 
-function getCollectionWindow(contributions: Contribution[], offsetMonths: number): CollectionMonthItem[] {
-  const totalsByMonth = new Map<string, number>();
-
-  contributions.forEach((contribution) => {
-    const key = monthKey(contribution.payment_date);
-    const current = totalsByMonth.get(key) ?? 0;
-    const amount = Number(contribution.bdt_amount);
-    if (contribution.status === "approved") totalsByMonth.set(key, current + amount);
-  });
+function getCollectionWindow(
+  contributions: Contribution[],
+  offsetMonths: number,
+  monthlyContributionBdt: number,
+  projectStartMonth: string,
+): CollectionMonthItem[] {
+  const totalsByMonth = getApprovedContributionTotalsByCoveredMonth(
+    contributions,
+    monthlyContributionBdt,
+    projectStartMonth,
+  );
 
   const endMonth = addMonths(startOfCurrentMonth(), offsetMonths);
   const monthDates = Array.from({ length: 6 }, (_unused, index) => addMonths(endMonth, index - 5));

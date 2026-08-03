@@ -2,6 +2,7 @@ import { describe, expect, it } from "vitest";
 import {
   DEFAULT_MONTHLY_MEMBER_CONTRIBUTION_BDT,
   getExitRequestPaidBdt,
+  getApprovedContributionTotalsByCoveredMonth,
   getMonthlyPaymentCoverage,
   getPerMemberTarget,
 } from "./investmentApi";
@@ -54,5 +55,50 @@ describe("getMonthlyPaymentCoverage", () => {
     expect(coverage.dueMonths).toBe(2);
     expect(coverage.paid).toBe(true);
     expect(coverage.paidThroughMonth).toBe("2026-07");
+  });
+});
+
+describe("getApprovedContributionTotalsByCoveredMonth", () => {
+  it("splits each member's approved bulk payment across the oldest uncovered months", () => {
+    const totals = getApprovedContributionTotalsByCoveredMonth([
+      {
+        member_id: "member-a",
+        payment_date: "2026-03-15",
+        bdt_amount: 30_000,
+        status: "approved",
+        created_at: "2026-03-15T08:00:00.000Z",
+      },
+      {
+        member_id: "member-b",
+        payment_date: "2026-03-20",
+        bdt_amount: 10_000,
+        status: "approved",
+        created_at: "2026-03-20T08:00:00.000Z",
+      },
+    ], 10_000, "2026-01");
+
+    expect(Object.fromEntries(totals)).toEqual({
+      "2026-01": 20_000,
+      "2026-02": 10_000,
+      "2026-03": 10_000,
+    });
+  });
+
+  it("keeps partial payments in the month they partially cover", () => {
+    const totals = getApprovedContributionTotalsByCoveredMonth([
+      {
+        member_id: "member-a",
+        payment_date: "2026-04-01",
+        bdt_amount: 25_000,
+        status: "approved",
+        created_at: "2026-04-01T08:00:00.000Z",
+      },
+    ]);
+
+    expect(Object.fromEntries(totals)).toEqual({
+      "2026-01": 10_000,
+      "2026-02": 10_000,
+      "2026-03": 5_000,
+    });
   });
 });

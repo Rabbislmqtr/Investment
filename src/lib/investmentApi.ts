@@ -67,6 +67,46 @@ export function getMonthlyPaymentCoverage(
   };
 }
 
+export function getApprovedContributionTotalsByCoveredMonth(
+  contributions: Array<Pick<Contribution, "member_id" | "payment_date" | "bdt_amount" | "status" | "created_at">>,
+  monthlyContributionBdt = DEFAULT_MONTHLY_MEMBER_CONTRIBUTION_BDT,
+  projectStartMonth = DEFAULT_PROJECT_START_MONTH,
+) {
+  const safeMonthlyContribution = Math.max(1, monthlyContributionBdt);
+  const startSerial = monthSerial(projectStartMonth);
+  const totalsByMonth = new Map<string, number>();
+  const contributionsByMember = new Map<string, Array<Pick<Contribution, "member_id" | "payment_date" | "bdt_amount" | "status" | "created_at">>>();
+
+  contributions.forEach((contribution) => {
+    if (contribution.status !== "approved" || Number(contribution.bdt_amount) <= 0) return;
+    const memberContributions = contributionsByMember.get(contribution.member_id) ?? [];
+    memberContributions.push(contribution);
+    contributionsByMember.set(contribution.member_id, memberContributions);
+  });
+
+  contributionsByMember.forEach((memberContributions) => {
+    let approvedForMember = 0;
+    memberContributions
+      .sort((left, right) => left.payment_date.localeCompare(right.payment_date) || left.created_at.localeCompare(right.created_at))
+      .forEach((contribution) => {
+        let remaining = Number(contribution.bdt_amount);
+
+        while (remaining > 0.000001) {
+          const monthIndex = Math.floor(approvedForMember / safeMonthlyContribution);
+          const amountAlreadyAppliedToMonth = approvedForMember % safeMonthlyContribution;
+          const appliedAmount = Math.min(remaining, safeMonthlyContribution - amountAlreadyAppliedToMonth);
+          const month = monthFromSerial(startSerial + monthIndex);
+
+          totalsByMonth.set(month, (totalsByMonth.get(month) ?? 0) + appliedAmount);
+          approvedForMember += appliedAmount;
+          remaining -= appliedAmount;
+        }
+      });
+  });
+
+  return totalsByMonth;
+}
+
 export async function getCurrentProfile(userId: string): Promise<Profile | null> {
   const { data, error } = await supabase
     .from("profiles")
