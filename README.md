@@ -50,8 +50,10 @@ to the rows above it. The fund position is always all-time across every member, 
 detail respects the on-screen month and member filters; the note under the member table states
 any difference, including money still held for members who have left the fund.
 
-The design tokens for the statement live in [`tokens.css`](tokens.css) and are namespaced
-`--report-*` so they never collide with the application's own theme tokens.
+The statement is its own module under [`src/report/`](src/report): the document component, its
+`statement.css`, the `tokens.css` it owns, and the font warm-up the print path needs. Its design
+tokens are namespaced `--report-*` so they never collide with the application's own theme
+tokens, and no application rule reads them.
 
 ## Environment
 

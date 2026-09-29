@@ -2,7 +2,11 @@
  * genre: editorial · macrostructure: Long Document · theme: Almanac
  * axes: paper=light · display=roman-serif · accent=chromatic-other (green)
  *
- * This file is the portable half of the printed statement of account on the Reports page.
+ * This is the portable half of the printed statement of account on the Reports page, and it
+ * travels with the statement: `statement.css` imports it, so the document resolves its own
+ * colours, type and paper geometry with no application stylesheet loaded at all. No app rule
+ * reads a `--report-*` token, which is what keeps that boundary honest.
+ *
  * It is deliberately namespaced `--report-*` rather than reusing the app's `--ink-*` /
  * `--surface` / `--accent` set: those tokens are redefined at runtime by the app's dark
  * theme layer, and a statement must always print on fixed light paper regardless of what

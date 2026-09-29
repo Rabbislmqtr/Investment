@@ -23,6 +23,10 @@
    Hallmark · pre-emit critique: P5 H5 E4 S5 R4 V5
    ========================================================================== */
 
+/* The statement's own token set. Imported here rather than from the app stylesheet so the
+   document resolves its own colours, type and paper geometry with nothing else loaded. */
+@import "./tokens.css";
+
 @page {
   size: A4 portrait;
   margin: 16mm 14mm;
