@@ -1,0 +1,853 @@
+/* The printed statement of account: every rule the statement document needs, and nothing
+   else. `ReportStatement.tsx` imports this file, which puts it after the application's
+   `styles.css` in the bundle. That order is load bearing rather than incidental — these
+   rules exist to win over the app's element-level table, print and theme resets — so
+   `main.tsx` deliberately imports `styles.css` first.
+
+   The three rules under "on-screen paper tray preview" dress the panel's export controls
+   rather than the sheet. They live here because they have to outrank
+   `.panel-title.split-title > div` in the app stylesheet, and this file is the last one
+   loaded.
+
+   ==========================================================================
+   Hallmark · report document
+   genre: editorial
+   macrostructure: Long Document
+   theme: Almanac (light paper · roman serif · green accent)
+   enrichment: none (typography only)
+   nav: none · footer: none — this is a paginated sheet, not a web page.
+   The panel's export controls stay in the app's own vocabulary.
+   contrast: pass (40–41) · honest: pass (46) · chrome: pass (47)
+   tokens: pass (48) · responsive: pass (49) · icons: pass (30)
+   mobile: pass (34, 49, 50–57) · slop: pass (42–45)
+   Hallmark · pre-emit critique: P5 H5 E4 S5 R4 V5
+   ========================================================================== */
+
+@page {
+  size: A4 portrait;
+  margin: 16mm 14mm;
+}
+
+/* ---- on-screen paper tray preview ---- */
+
+/* `.panel-title.split-title > div` is more specific than a bare class, and it forces a
+   non-wrapping 10px-gap flex row on the button group. Matching its specificity lets the
+   three export controls wrap instead of overflowing a narrow panel. */
+.panel-title.split-title > .report-title-actions {
+  flex-wrap: wrap;
+  justify-content: flex-end;
+  gap: var(--report-space-xs);
+}
+
+/* Clickable affordances stay on one line at every width. */
+.panel-title.split-title > .report-title-actions > button {
+  white-space: nowrap;
+}
+
+.report-print-button {
+  border: 1px solid var(--accent);
+  color: var(--accent);
+}
+
+.report-hint {
+  margin: 0 0 12px;
+  color: var(--ink-500);
+  font-size: 0.82rem;
+  line-height: 1.5;
+}
+
+/* The statement is portalled to the end of <body>, so it is its own surface: a fixed,
+   scrollable print-preview overlay on screen, and a bare flow of paper in print. Nothing
+   in here depends on the app's dark theme — hence the report tokens throughout. */
+.report-doc {
+  display: none;
+}
+
+@media screen {
+  .report-doc.is-preview {
+    display: block;
+    position: fixed;
+    inset: 0;
+    z-index: var(--report-z-preview);
+    overflow: auto;
+    padding: var(--report-space-lg) var(--report-space-sm);
+    background: var(--report-tray);
+  }
+}
+
+.report-preview-bar {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  gap: var(--report-space-md);
+  width: var(--report-sheet-width);
+  margin: 0 auto var(--report-space-sm);
+}
+
+.report-preview-note {
+  margin: 0;
+  color: var(--report-muted);
+  font-family: var(--report-font-body);
+  font-size: var(--report-text-2xs);
+  line-height: 1.5;
+}
+
+.report-preview-close {
+  flex-shrink: 0;
+  min-height: 32pt;
+  padding: 0 var(--report-space-md);
+  border: var(--report-rule-base) solid var(--report-ink);
+  border-radius: 0;
+  background: var(--report-paper);
+  color: var(--report-ink);
+  font-family: var(--report-font-body);
+  font-size: var(--report-text-2xs);
+  font-weight: 600;
+  letter-spacing: 0.08em;
+  text-transform: uppercase;
+  white-space: nowrap;
+  cursor: pointer;
+}
+
+.report-preview-close:hover:not(:disabled) {
+  background: var(--report-paper-3);
+}
+
+.report-preview-close:focus-visible {
+  outline: var(--report-rule-accent) solid var(--report-focus);
+  outline-offset: 2pt;
+}
+
+.report-preview-close:active:not(:disabled) {
+  background: var(--report-paper-2);
+}
+
+.report-preview-close:disabled {
+  opacity: 0.55;
+  cursor: not-allowed;
+}
+
+/* ---- the sheet ---- */
+
+.report-doc {
+  background: var(--report-tray);
+  color: var(--report-ink);
+  font-family: var(--report-font-body);
+  font-size: var(--report-text-sm);
+  line-height: 1.45;
+  font-variant-numeric: tabular-nums;
+  text-rendering: optimizeLegibility;
+  -webkit-font-smoothing: antialiased;
+}
+
+.report-doc h1,
+.report-doc h2,
+.report-doc h3,
+.report-doc p,
+.report-doc figure,
+.report-doc table {
+  margin: 0;
+}
+
+/* The application styles raw elements globally (`table`, `th`, `td`, `tbody tr:hover`), and
+   this document is portalled outside #root, so those rules still reach it. Left alone, the
+   statement inherits the app's dark-theme table chrome — a slate header band and blue-grey
+   cell text — onto light paper. Reverting those elements lets the statement own its own
+   typography; the per-cell classes below re-assert the colour each one needs. */
+.report-doc table {
+  color: var(--report-ink);
+}
+
+.report-doc th,
+.report-doc td {
+  background: none;
+  color: var(--report-ink);
+  border-bottom-color: var(--report-rule);
+  font-weight: 400;
+  letter-spacing: normal;
+  text-align: left;
+  text-transform: none;
+}
+
+.report-doc tbody tr:hover {
+  background: none;
+}
+
+/* The application collapses every table into stacked cards below a narrow-viewport media
+   query: table parts become block/grid, the `thead` is visually hidden, and each cell gains a
+   `data-label` pseudo-element. The printed page box is itself narrow, so that pattern fired
+   during printing and turned every statement row into a card — one row per physical page.
+   A statement has a fixed paper measure, so its tables re-assert real table layout
+   unconditionally, on screen and on paper alike. */
+.report-doc table {
+  display: table;
+}
+
+.report-doc thead {
+  display: table-header-group;
+  position: static;
+  clip: auto;
+  width: auto;
+  height: auto;
+  overflow: visible;
+}
+
+.report-doc tbody {
+  display: table-row-group;
+}
+
+/* Deliberately a row group, not a footer group: Chromium repeats a `table-footer-group` on
+   every page fragment, which printed a "Total · 11 members" row underneath the nine members
+   that happened to land on page one. The total belongs once, at the end of the table. */
+.report-doc tfoot {
+  display: table-row-group;
+}
+
+.report-doc tr {
+  display: table-row;
+  border: none;
+  border-radius: 0;
+  background: none;
+  padding: 0;
+}
+
+.report-doc th,
+.report-doc td {
+  display: table-cell;
+}
+
+.report-doc th::before,
+.report-doc td::before {
+  content: none;
+}
+
+.report-sheet {
+  width: var(--report-sheet-width);
+  min-height: var(--report-sheet-min-height);
+  margin: 0 auto var(--report-space-md);
+  padding: var(--report-sheet-pad-block) var(--report-sheet-pad-inline);
+  background: var(--report-paper);
+  border: var(--report-rule-hair) solid var(--report-rule);
+  display: flex;
+  flex-direction: column;
+  gap: var(--report-space-lg);
+}
+
+.report-sheet:last-child {
+  margin-bottom: 0;
+}
+
+/* ---- masthead: everything stacks in one column ---- */
+
+.report-masthead {
+  display: flex;
+  flex-direction: column;
+  gap: var(--report-space-2xs);
+  padding-bottom: var(--report-space-xs);
+  border-bottom: var(--report-rule-accent) solid var(--report-ink);
+}
+
+.report-masthead__wordmark {
+  font-family: var(--report-font-display);
+  font-size: var(--report-text-md);
+  font-weight: 600;
+  letter-spacing: -0.01em;
+  font-style: normal;
+}
+
+.report-masthead__title {
+  font-family: var(--report-font-display);
+  font-size: var(--report-text-2xl);
+  font-weight: 400;
+  font-style: normal;
+  line-height: 1.1;
+  letter-spacing: -0.02em;
+  overflow-wrap: anywhere;
+  min-width: 0;
+}
+
+.report-masthead__scope {
+  color: var(--report-muted);
+  font-size: var(--report-text-xs);
+}
+
+.report-masthead__lede {
+  max-width: var(--report-measure);
+  color: var(--report-ink-2);
+  font-size: var(--report-text-sm);
+}
+
+/* ---- sheet heads: label stacked above the heading, never beside it ---- */
+
+.report-sheet__head {
+  display: flex;
+  flex-direction: column;
+  gap: var(--report-space-3xs);
+  padding-top: var(--report-space-xs);
+  border-top: var(--report-rule-base) solid var(--report-ink);
+}
+
+.report-sheet__title {
+  font-family: var(--report-font-display);
+  font-size: var(--report-text-xl);
+  font-weight: 400;
+  font-style: normal;
+  line-height: 1.15;
+  letter-spacing: -0.015em;
+  overflow-wrap: anywhere;
+  min-width: 0;
+}
+
+.report-sheet__scope {
+  color: var(--report-muted);
+  font-size: var(--report-text-2xs);
+}
+
+.report-block {
+  display: flex;
+  flex-direction: column;
+  gap: var(--report-space-sm);
+}
+
+/* ---- fund position figures ---- */
+
+.report-figures {
+  display: grid;
+  grid-template-columns: repeat(4, minmax(0, 1fr));
+  gap: var(--report-space-md);
+}
+
+.report-figure {
+  display: flex;
+  flex-direction: column;
+  gap: var(--report-space-3xs);
+  padding-top: var(--report-space-2xs);
+  border-top: var(--report-rule-hair) solid var(--report-rule);
+}
+
+.report-figure--hinge {
+  border-top: var(--report-rule-accent) solid var(--report-accent);
+  print-color-adjust: exact;
+  -webkit-print-color-adjust: exact;
+}
+
+.report-figure__label {
+  color: var(--report-muted);
+  font-size: var(--report-text-2xs);
+  font-weight: 600;
+  letter-spacing: 0.08em;
+  text-transform: uppercase;
+}
+
+.report-figure__value {
+  font-family: var(--report-font-body);
+  font-size: var(--report-text-lg);
+  font-weight: 600;
+  line-height: 1.1;
+  letter-spacing: -0.01em;
+}
+
+.report-figure--hinge .report-figure__value {
+  color: var(--report-accent);
+}
+
+/* ---- tables ---- */
+
+.report-table {
+  width: 100%;
+  border-collapse: collapse;
+  table-layout: fixed;
+}
+
+.report-table caption {
+  caption-side: top;
+  text-align: left;
+  padding-bottom: var(--report-space-2xs);
+  color: var(--report-muted);
+  font-size: var(--report-text-2xs);
+}
+
+.report-table th,
+.report-table td {
+  padding: var(--report-space-2xs) var(--report-space-xs) var(--report-space-2xs) 0;
+  border-bottom: var(--report-rule-hair) solid var(--report-rule);
+  font-size: var(--report-text-sm);
+  text-align: left;
+  vertical-align: top;
+  overflow-wrap: anywhere;
+  min-width: 0;
+}
+
+.report-table th:last-child,
+.report-table td:last-child {
+  padding-right: 0;
+}
+
+.report-table thead th {
+  padding-top: var(--report-space-xs);
+  border-bottom: var(--report-rule-base) solid var(--report-rule-strong);
+  color: var(--report-muted);
+  font-size: var(--report-text-2xs);
+  font-weight: 600;
+  letter-spacing: 0.08em;
+  text-transform: uppercase;
+}
+
+.report-table tbody th {
+  font-weight: 400;
+}
+
+.report-table .num {
+  text-align: right;
+  padding-right: var(--report-space-sm);
+}
+
+.report-table .num:last-child {
+  padding-right: 0;
+}
+
+.report-table tfoot th,
+.report-table tfoot td {
+  padding-top: var(--report-space-xs);
+  border-top: var(--report-rule-base) solid var(--report-rule-strong);
+  border-bottom: none;
+  color: var(--report-ink);
+  font-weight: 600;
+  font-size: var(--report-text-sm);
+}
+
+.report-table tfoot .num {
+  font-weight: 600;
+}
+
+/* ---- member accounts sheet ---- */
+
+.report-member {
+  display: flex;
+  flex-direction: column;
+  gap: var(--report-space-3xs);
+}
+
+.report-member__name {
+  font-weight: 600;
+  font-size: var(--report-text-sm);
+}
+
+.report-member__meta {
+  color: var(--report-muted);
+  font-size: var(--report-text-3xs);
+}
+
+.report-balance {
+  display: flex;
+  flex-direction: column;
+  align-items: flex-end;
+  gap: var(--report-space-3xs);
+  font-size: var(--report-text-sm);
+}
+
+.report-balance--due {
+  color: var(--report-alert);
+  font-weight: 600;
+}
+
+.report-balance--clear {
+  color: var(--report-ink-2);
+}
+
+.report-coverage {
+  display: flex;
+  flex-direction: column;
+  gap: var(--report-space-3xs);
+}
+
+.report-coverage__track {
+  display: block;
+  height: 3pt;
+  background: var(--report-paper-3);
+}
+
+.report-coverage__fill {
+  display: block;
+  height: 100%;
+  background: var(--report-accent);
+  print-color-adjust: exact;
+  -webkit-print-color-adjust: exact;
+}
+
+.report-coverage__fill.is-overdue {
+  background: var(--report-alert);
+}
+
+.report-coverage__value {
+  color: var(--report-muted);
+  font-size: var(--report-text-3xs);
+}
+
+.report-doc .report-index {
+  color: var(--report-muted);
+  font-size: var(--report-text-3xs);
+}
+
+/* Column widths live in colgroup classes so adding the per-month column cannot
+   desynchronise an nth-child rule. The table scales them proportionally to 100%. */
+.report-col--index {
+  width: 7mm;
+}
+
+.report-col--member {
+  width: 40mm;
+}
+
+.report-col--figure {
+  width: 22mm;
+}
+
+.report-col--period {
+  width: 22mm;
+}
+
+.report-col--month {
+  width: 24mm;
+}
+
+.report-col--date {
+  width: 20mm;
+}
+
+.report-col--calendar-member {
+  width: 40mm;
+}
+
+.report-col--calendar-count {
+  width: 14mm;
+}
+
+.report-col--ledger-date {
+  width: 18mm;
+}
+
+.report-col--ledger-member {
+  width: 44mm;
+}
+
+.report-col--ledger-amount {
+  width: 24mm;
+}
+
+.report-col--ledger-method {
+  width: 28mm;
+}
+
+.report-col--ledger-source {
+  width: 24mm;
+}
+
+/* Wide enough for the word "Receipt" at 7 pt with 0.08em tracking, which head-wrapped to
+   "RECEI / PT" at 14 mm. */
+.report-col--ledger-receipt {
+  width: 17mm;
+}
+
+.report-col--ledger-running {
+  width: 26mm;
+}
+
+.report-note {
+  max-width: var(--report-measure);
+  color: var(--report-ink-2);
+  font-size: var(--report-text-2xs);
+  line-height: 1.5;
+}
+
+/* ---- payment calendar sheet ---- */
+
+.report-calendar-block {
+  display: flex;
+  flex-direction: column;
+  gap: var(--report-space-2xs);
+}
+
+.report-table--calendar {
+  font-size: var(--report-text-2xs);
+  table-layout: fixed;
+}
+
+.report-table--calendar th,
+.report-table--calendar td {
+  padding: var(--report-space-3xs) var(--report-space-2xs) var(--report-space-3xs) 0;
+  text-align: right;
+}
+
+.report-table--calendar tbody th,
+.report-table--calendar thead th:first-child {
+  text-align: left;
+  font-size: var(--report-text-2xs);
+  width: 40mm;
+}
+
+.report-table--calendar thead th:last-child,
+.report-table--calendar tfoot th:last-child {
+  width: 14mm;
+}
+
+.report-table--calendar thead th {
+  font-size: var(--report-text-3xs);
+  letter-spacing: 0.06em;
+  border-top: none;
+}
+
+.report-table--calendar thead th.is-scope {
+  color: var(--report-accent);
+  border-bottom: var(--report-rule-accent) solid var(--report-accent);
+  print-color-adjust: exact;
+  -webkit-print-color-adjust: exact;
+}
+
+.report-table--calendar .is-empty {
+  color: var(--report-muted);
+}
+
+.report-table--calendar .is-paid {
+  color: var(--report-ink);
+  font-weight: 600;
+}
+
+.report-table--calendar tfoot th,
+.report-table--calendar tfoot td {
+  font-size: var(--report-text-2xs);
+}
+
+/* ---- ledger detail sheet ---- */
+
+.report-month-group > tr:first-child > .report-month-head {
+  padding-top: var(--report-space-sm);
+  border-bottom: var(--report-rule-base) solid var(--report-rule-strong);
+}
+
+.report-month-group + .report-month-group > tr:first-child > .report-month-head {
+  border-top: var(--report-rule-hair) solid var(--report-rule);
+}
+
+.report-doc .report-month-head {
+  padding-left: var(--report-space-xs);
+  font-family: var(--report-font-display);
+  font-size: var(--report-text-md);
+  font-weight: 600;
+  font-style: normal;
+  letter-spacing: -0.01em;
+  text-transform: none;
+  color: var(--report-ink);
+}
+
+.report-month-head__meta {
+  display: block;
+  font-family: var(--report-font-body);
+  font-size: var(--report-text-3xs);
+  font-weight: 400;
+  letter-spacing: 0;
+  color: var(--report-muted);
+}
+
+.report-month-subtotal th {
+  font-size: var(--report-text-2xs);
+  font-weight: 600;
+  color: var(--report-ink-2);
+}
+
+.report-ledger-cell {
+  display: flex;
+  flex-direction: column;
+  gap: 1pt;
+}
+
+.report-ledger-cell__sub {
+  display: block;
+  color: var(--report-muted);
+  font-size: var(--report-text-3xs);
+}
+
+.report-doc .report-receipt {
+  font-size: var(--report-text-3xs);
+  font-weight: 600;
+  text-align: right;
+}
+
+.report-doc .report-receipt--yes {
+  color: var(--report-accent);
+}
+
+.report-doc .report-receipt--no {
+  color: var(--report-muted);
+}
+
+.report-ledger-footnote {
+  margin-top: var(--report-space-2xs);
+  color: var(--report-muted);
+  font-size: var(--report-text-3xs);
+}
+
+/* ---- print ---- */
+
+@media print {
+  /* The app's `:root { color-scheme: dark }` outranks a bare `html` selector, so the
+     print canvas must opt back into light with `!important` too — otherwise Chromium
+     paints its dark base colour (#121212) across every printed page. */
+  html,
+  body {
+    background: var(--report-paper) !important;
+    color-scheme: light !important;
+  }
+
+  /* The sheets sit on the page's own paper, so they must not double-paint it. */
+  .report-doc,
+  .report-doc .report-sheet {
+    background: none !important;
+  }
+
+  body::before {
+    display: none !important;
+  }
+
+  /* Hide the app only when the statement is actually mounted, so printing any other
+     screen still behaves normally instead of producing a blank page. */
+  body:has(.report-doc) #root {
+    display: none !important;
+  }
+
+  body:has(.report-doc) .report-doc {
+    display: block !important;
+  }
+
+  /* Undo the preview overlay so the statement becomes plain flowing paper. */
+  .report-doc {
+    position: static;
+    inset: auto;
+    overflow: visible;
+    padding: 0;
+    background: none;
+  }
+
+  /* @page supplies the margin, so the sheet becomes a bare flow of paper. */
+  .report-sheet {
+    width: auto;
+    min-height: 0;
+    margin: 0;
+    padding: 0;
+    background: none;
+    border: none;
+    display: block;
+  }
+
+  .report-sheet + .report-sheet {
+    break-before: page;
+  }
+
+  .report-sheet > * + * {
+    margin-top: var(--report-space-lg);
+  }
+
+  /* Chromium fragments block flow reliably but flex and grid containers badly: a table
+     nested inside a flex column paginates one row per page instead of flowing. The printed
+     statement therefore drops back to plain block flow and re-adds the gaps flex supplied. */
+  .report-doc .report-sheet,
+  .report-doc .report-block,
+  .report-doc .report-sheet__head,
+  .report-doc .report-masthead,
+  .report-doc .report-figure,
+  .report-doc .report-calendar-block,
+  .report-doc .report-member,
+  .report-doc .report-coverage,
+  .report-doc .report-ledger-cell,
+  .report-doc .report-balance {
+    display: block;
+  }
+
+  .report-doc .report-masthead > * + *,
+  .report-doc .report-sheet__head > * + *,
+  .report-doc .report-figure > * + *,
+  .report-doc .report-member > * + *,
+  .report-doc .report-coverage > * + *,
+  .report-doc .report-ledger-cell > * + *,
+  .report-doc .report-balance > * + * {
+    margin-top: var(--report-space-3xs);
+  }
+
+  .report-doc .report-block > * + * {
+    margin-top: var(--report-space-sm);
+  }
+
+  .report-doc .report-calendar-block > * + * {
+    margin-top: var(--report-space-2xs);
+  }
+
+  .report-doc thead {
+    display: table-header-group;
+  }
+
+  .report-doc tr,
+  .report-doc .report-calendar-block,
+  .report-doc .report-figures,
+  .report-doc .report-table tfoot {
+    break-inside: avoid;
+  }
+
+  /* Keeping a whole month atomic shoves up to half a month (≈25 mm) of white space ahead
+     of every page break, which pushed the ledger's closing footing onto a page of its own.
+     Let a month straddle the break, but never strand its heading at the foot of a page. */
+  .report-doc .report-month-group {
+    break-inside: auto;
+  }
+
+  .report-doc tr:has(> .report-month-head) {
+    break-after: avoid;
+  }
+
+  .report-doc .report-sheet__head,
+  .report-doc .report-masthead,
+  .report-doc .report-month-head {
+    break-after: avoid;
+  }
+
+  /* Paper pays for every millimetre. The screen composition is deliberately roomy, and
+     at screen density an eleven-member roster overflows page 1 by a single row — the
+     orphan row plus its footing then lands alone on page 2. Tighten only in print so the
+     on-screen preview keeps its proportions. */
+  .report-doc .report-sheet > * + * {
+    margin-top: var(--report-space-sm);
+  }
+
+  .report-doc .report-block > * + * {
+    margin-top: var(--report-space-2xs);
+  }
+
+  .report-doc .report-table th,
+  .report-doc .report-table td {
+    padding-top: var(--report-space-3xs);
+    padding-bottom: var(--report-space-3xs);
+  }
+
+  .report-doc .report-masthead {
+    padding-bottom: var(--report-space-3xs);
+  }
+
+  /* Each member and balance cell stacks two or three short lines; in print the gaps
+     between them are the difference between eleven rows fitting and ten. */
+  .report-doc .report-member,
+  .report-doc .report-balance,
+  .report-doc .report-coverage {
+    gap: 0;
+  }
+
+  .report-doc .report-ledger-cell > * + * {
+    margin-top: 0;
+  }
+
+  .report-preview-bar,
+  .report-preview-note,
+  .report-hint,
+  .report-title-actions {
+    display: none !important;
+  }
+}
+/* Hallmark · end report document */
