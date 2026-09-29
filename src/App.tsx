@@ -2238,8 +2238,7 @@ function AdminReportPanel({ contributions, members, project, exitSummary, onOpen
 
   /**
    * Chromium names the downloaded PDF after the document title, so the title is swapped for
-   * the length of the print and put back afterwards. Fonts are awaited first — otherwise the
-   * statement renders in a fallback face.
+   * the length of the print and put back afterwards.
    */
   async function saveStatementAsPdf() {
     const previousTitle = document.title;
@@ -2250,12 +2249,7 @@ function AdminReportPanel({ contributions, members, project, exitSummary, onOpen
     };
     window.addEventListener("afterprint", restoreTitle);
 
-    try {
-      await document.fonts.ready;
-    } catch {
-      // A browser without the Font Loading API still prints; it just may not use Newsreader.
-    }
-
+    await warmStatementFonts();
     window.print();
   }
 
@@ -2427,6 +2421,30 @@ function AdminReportPanel({ contributions, members, project, exitSummary, onOpen
  * chasing every wrapper between here and the root would be fragile, and portalling keeps
  * the statement out of the app's dark theme regardless of how that theme evolves.
  */
+/**
+ * The statement is always mounted but hidden until it is printed, and a browser does not fetch
+ * a webfont for a `display: none` subtree. `document.fonts.ready` on its own therefore resolves
+ * immediately and the PDF lands in a fallback face, so each face has to be requested by name
+ * before the print dialog opens.
+ */
+async function warmStatementFonts() {
+  if (!document.fonts) return;
+
+  const specs = [
+    "400 16px Newsreader",
+    "600 16px Newsreader",
+    '400 16px "IBM Plex Sans"',
+    '600 16px "IBM Plex Sans"',
+  ];
+
+  try {
+    await Promise.all(specs.map((spec) => document.fonts.load(spec)));
+    await document.fonts.ready;
+  } catch {
+    // A browser without the Font Loading API still prints; it just may not use the intended faces.
+  }
+}
+
 function ReportStatement({ model, preview, onClosePreview }: {
   model: ReportModel;
   preview: boolean;
