@@ -25,6 +25,34 @@ npm run dev
 - Admin-created member accounts and password recovery.
 - Single visible investment project, with database support for future projects.
 
+## PDF report export
+
+The admin **Reports** tab (`Approved ledger report`) prints a three-sheet statement of
+account from the approved ledger:
+
+1. **Member accounts** — every active member, paid or not, with required-to-date, paid-to-date,
+   balance, paid-through month and coverage. Unpaid members sort first, largest shortfall at the top.
+2. **Payment calendar** — a member × month grid showing what each member paid in each month,
+   in six-month blocks with the member column repeated.
+3. **Ledger detail** — every approved payment in date order with month subtotals and a running
+   total, closing on a balance that reconciles to the fund position on sheet 1.
+
+`Save as PDF` opens the browser print dialog on the statement. The document is rendered outside
+the application root and carries its own light paper palette, so it prints as paper regardless of
+the app's dark theme. Two things worth knowing:
+
+- Choose **Save as PDF** as the destination, and leave **Headers and footers** unticked for a
+  clean sheet. The suggested filename comes from the document title.
+- The on-screen `Preview sheet` overlay renders at true A4 size. Scroll sideways for the full sheet.
+
+Amounts are rounded to whole taka as they enter the report model, so every column foots exactly
+to the rows above it. The fund position is always all-time across every member, while the ledger
+detail respects the on-screen month and member filters; the note under the member table states
+any difference, including money still held for members who have left the fund.
+
+The design tokens for the statement live in [`tokens.css`](tokens.css) and are namespaced
+`--report-*` so they never collide with the application's own theme tokens.
+
 ## Environment
 
 Use only the Supabase publishable key in `VITE_SUPABASE_PUBLISHABLE_KEY`. Do not put a Supabase secret or service-role key in `.env.local` or Netlify public environment variables.
