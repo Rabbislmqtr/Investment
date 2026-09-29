@@ -6567,6 +6567,54 @@ textarea:focus {
   background: none;
 }
 
+/* The application collapses every table into stacked cards below a narrow-viewport media
+   query: table parts become block/grid, the `thead` is visually hidden, and each cell gains a
+   `data-label` pseudo-element. The printed page box is itself narrow, so that pattern fired
+   during printing and turned every statement row into a card — one row per physical page.
+   A statement has a fixed paper measure, so its tables re-assert real table layout
+   unconditionally, on screen and on paper alike. */
+.report-doc table {
+  display: table;
+}
+
+.report-doc thead {
+  display: table-header-group;
+  position: static;
+  clip: auto;
+  width: auto;
+  height: auto;
+  overflow: visible;
+}
+
+.report-doc tbody {
+  display: table-row-group;
+}
+
+/* Deliberately a row group, not a footer group: Chromium repeats a `table-footer-group` on
+   every page fragment, which printed a "Total · 11 members" row underneath the nine members
+   that happened to land on page one. The total belongs once, at the end of the table. */
+.report-doc tfoot {
+  display: table-row-group;
+}
+
+.report-doc tr {
+  display: table-row;
+  border: none;
+  border-radius: 0;
+  background: none;
+  padding: 0;
+}
+
+.report-doc th,
+.report-doc td {
+  display: table-cell;
+}
+
+.report-doc th::before,
+.report-doc td::before {
+  content: none;
+}
+
 .report-sheet {
   width: var(--report-sheet-width);
   min-height: var(--report-sheet-min-height);
@@ -6882,15 +6930,17 @@ textarea:focus {
 }
 
 .report-col--ledger-method {
-  width: 31mm;
+  width: 28mm;
 }
 
 .report-col--ledger-source {
-  width: 25mm;
+  width: 24mm;
 }
 
+/* Wide enough for the word "Receipt" at 7 pt with 0.08em tracking, which head-wrapped to
+   "RECEI / PT" at 14 mm. */
 .report-col--ledger-receipt {
-  width: 14mm;
+  width: 17mm;
 }
 
 .report-col--ledger-running {
@@ -7034,10 +7084,19 @@ textarea:focus {
 /* ---- print ---- */
 
 @media print {
+  /* The app's `:root { color-scheme: dark }` outranks a bare `html` selector, so the
+     print canvas must opt back into light with `!important` too — otherwise Chromium
+     paints its dark base colour (#121212) across every printed page. */
   html,
   body {
+    background: var(--report-paper) !important;
+    color-scheme: light !important;
+  }
+
+  /* The sheets sit on the page's own paper, so they must not double-paint it. */
+  .report-doc,
+  .report-doc .report-sheet {
     background: none !important;
-    color-scheme: light;
   }
 
   body::before {
@@ -7082,6 +7141,40 @@ textarea:focus {
     margin-top: var(--report-space-lg);
   }
 
+  /* Chromium fragments block flow reliably but flex and grid containers badly: a table
+     nested inside a flex column paginates one row per page instead of flowing. The printed
+     statement therefore drops back to plain block flow and re-adds the gaps flex supplied. */
+  .report-doc .report-sheet,
+  .report-doc .report-block,
+  .report-doc .report-sheet__head,
+  .report-doc .report-masthead,
+  .report-doc .report-figure,
+  .report-doc .report-calendar-block,
+  .report-doc .report-member,
+  .report-doc .report-coverage,
+  .report-doc .report-ledger-cell,
+  .report-doc .report-balance {
+    display: block;
+  }
+
+  .report-doc .report-masthead > * + *,
+  .report-doc .report-sheet__head > * + *,
+  .report-doc .report-figure > * + *,
+  .report-doc .report-member > * + *,
+  .report-doc .report-coverage > * + *,
+  .report-doc .report-ledger-cell > * + *,
+  .report-doc .report-balance > * + * {
+    margin-top: var(--report-space-3xs);
+  }
+
+  .report-doc .report-block > * + * {
+    margin-top: var(--report-space-sm);
+  }
+
+  .report-doc .report-calendar-block > * + * {
+    margin-top: var(--report-space-2xs);
+  }
+
   .report-doc thead {
     display: table-header-group;
   }
@@ -7093,14 +7186,55 @@ textarea:focus {
     break-inside: avoid;
   }
 
+  /* Keeping a whole month atomic shoves up to half a month (≈25 mm) of white space ahead
+     of every page break, which pushed the ledger's closing footing onto a page of its own.
+     Let a month straddle the break, but never strand its heading at the foot of a page. */
   .report-doc .report-month-group {
-    break-inside: avoid-page;
+    break-inside: auto;
+  }
+
+  .report-doc tr:has(> .report-month-head) {
+    break-after: avoid;
   }
 
   .report-doc .report-sheet__head,
   .report-doc .report-masthead,
   .report-doc .report-month-head {
     break-after: avoid;
+  }
+
+  /* Paper pays for every millimetre. The screen composition is deliberately roomy, and
+     at screen density an eleven-member roster overflows page 1 by a single row — the
+     orphan row plus its footing then lands alone on page 2. Tighten only in print so the
+     on-screen preview keeps its proportions. */
+  .report-doc .report-sheet > * + * {
+    margin-top: var(--report-space-sm);
+  }
+
+  .report-doc .report-block > * + * {
+    margin-top: var(--report-space-2xs);
+  }
+
+  .report-doc .report-table th,
+  .report-doc .report-table td {
+    padding-top: var(--report-space-3xs);
+    padding-bottom: var(--report-space-3xs);
+  }
+
+  .report-doc .report-masthead {
+    padding-bottom: var(--report-space-3xs);
+  }
+
+  /* Each member and balance cell stacks two or three short lines; in print the gaps
+     between them are the difference between eleven rows fitting and ten. */
+  .report-doc .report-member,
+  .report-doc .report-balance,
+  .report-doc .report-coverage {
+    gap: 0;
+  }
+
+  .report-doc .report-ledger-cell > * + * {
+    margin-top: 0;
   }
 
   .report-preview-bar,
