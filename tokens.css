@@ -1,0 +1,81 @@
+/* Hallmark · design tokens · report document
+ * genre: editorial · macrostructure: Long Document · theme: Almanac
+ * axes: paper=light · display=roman-serif · accent=chromatic-other (green)
+ *
+ * This file is the portable half of the printed statement of account on the Reports page.
+ * It is deliberately namespaced `--report-*` rather than reusing the app's `--ink-*` /
+ * `--surface` / `--accent` set: those tokens are redefined at runtime by the app's dark
+ * theme layer, and a statement must always print on fixed light paper regardless of what
+ * the screen is wearing. Shadowing them here would make both sets lie.
+ *
+ * Colours are OKLCH, every neutral is tinted toward anchor hue 150, and spacing is
+ * measured in points on a 4 pt scale because the target medium is a sheet of paper.
+ */
+
+:root {
+  /* ---- surface ---- */
+  --report-paper: oklch(98.4% 0.006 150);
+  --report-paper-2: oklch(96.6% 0.008 150);
+  --report-paper-3: oklch(94.4% 0.01 150);
+  --report-tray: oklch(93% 0.01 150);
+
+  /* ---- rules ---- */
+  --report-rule: oklch(84% 0.01 150);
+  --report-rule-strong: oklch(62% 0.012 150);
+
+  /* ---- text ---- */
+  --report-ink: oklch(20% 0.012 150);
+  --report-ink-2: oklch(34% 0.012 150);
+  --report-muted: oklch(46% 0.012 150);
+
+  /* ---- accent: the highlighter, never a background ---- */
+  --report-accent: oklch(46% 0.11 160);
+  --report-accent-ink: oklch(97% 0.01 150);
+  --report-accent-soft: oklch(95.5% 0.022 160);
+  --report-focus: oklch(46% 0.14 160);
+
+  /* ---- alert: overdue money only, always paired with the word "due" ---- */
+  --report-alert: oklch(45% 0.16 25);
+
+  /* ---- type ---- */
+  --report-font-display: "Newsreader", ui-serif, Georgia, serif;
+  --report-font-body: "IBM Plex Sans", ui-sans-serif, system-ui, sans-serif;
+
+  --report-text-3xs: 6pt;
+  --report-text-2xs: 7pt;
+  --report-text-xs: 7.5pt;
+  --report-text-sm: 8.5pt;
+  --report-text-base: 10pt;
+  --report-text-md: 12pt;
+  --report-text-lg: 15pt;
+  --report-text-xl: 19pt;
+  --report-text-2xl: 25pt;
+
+  /* ---- spacing: 4 pt base, named by role ---- */
+  --report-space-3xs: 2pt;
+  --report-space-2xs: 4pt;
+  --report-space-xs: 8pt;
+  --report-space-sm: 12pt;
+  --report-space-md: 16pt;
+  --report-space-lg: 24pt;
+  --report-space-xl: 32pt;
+  --report-space-2xl: 48pt;
+  --report-space-3xl: 64pt;
+
+  /* ---- rule weights ---- */
+  --report-rule-hair: 0.5pt;
+  --report-rule-base: 1pt;
+  --report-rule-accent: 2pt;
+
+  /* ---- paper geometry ---- */
+  --report-sheet-width: 210mm;
+  --report-sheet-min-height: 297mm;
+  --report-sheet-pad-block: 16mm;
+  --report-sheet-pad-inline: 14mm;
+
+  /* ---- measures ---- */
+  --report-measure: 65ch;
+
+  /* Sits above the app's highest surface (the 80 used by its mobile sidebar). */
+  --report-z-preview: 90;
+}
